@@ -1,16 +1,32 @@
-/* Slightly increase navbar brand font size */
+/* ── Skip-to-content link ───────────────────────────── */
+.skip-link {
+  position: absolute;
+  top: -100%;
+  left: 1rem;
+  z-index: 9999;
+  padding: 0.5rem 1rem;
+  background: #0d6efd;
+  color: #fff;
+  border-radius: 0 0 0.4rem 0.4rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: top 0.1s;
+}
+.skip-link:focus { top: 0; color: #fff; }
+
+/* ── Navbar brand ───────────────────────────────────── */
 .navbar-brand {
     font-size: 1.4rem;
     font-weight: 700;
 }
 
-/* Main content breathing room */
+/* ── Main content ───────────────────────────────────── */
 main.container {
     min-height: 80vh;
     padding-bottom: 3rem;
 }
 
-/* Footer */
+/* ── Footer ─────────────────────────────────────────── */
 footer {
     background-color: #212529;
     color: #adb5bd;
@@ -57,11 +73,12 @@ footer {
 /* ── Batch Scanner ──────────────────────────────────── */
 .table-danger-subtle { background-color: #fff5f5; }
 
-/* sticky table header inside scrollable div */
-.sticky-top { position: sticky; top: 0; z-index: 1; }
-
-/* summary card icon sizing */
-.card-body .fs-2 { font-size: 1.8rem !important; }
+/* Sticky thead inside a scrollable div — higher z-index than default to stay above rows */
+.table-scroll-wrap thead.sticky-top th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
 
 /* ── Analytics Dashboard ───────────────────────────────── */
 .dash-card-icon {
@@ -69,6 +86,34 @@ footer {
   line-height: 1.4;
 }
 
+/* ── Chart wrappers (responsive fixed-height containers) ── */
+/* overflow:hidden + flex-shrink:0 + display:block on canvas are all
+   required to prevent the Chart.js ResizeObserver resize loop.
+   Without overflow:hidden the canvas overflows the container, the
+   ResizeObserver fires again at the new larger size, and the chart
+   grows indefinitely — especially visible in h-100 flex cards. */
+.chart-container {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  flex-shrink: 0;  /* don't let flex layout compress or grow this box */
+}
+.chart-container canvas {
+  display: block;  /* removes inline bottom gap that confuses ResizeObserver */
+}
+
+/* ── Focus visible ring ─────────────────────────────── */
+:focus-visible {
+  outline: 2px solid #0d6efd;
+  outline-offset: 2px;
+}
+
 @media (max-width: 576px) {
-  .card-body { padding: 0.6rem !important; }
+  .card-body { padding: 0.75rem !important; }
+  .verdict-banner { padding: 1rem !important; }
+  .verdict-text.fs-2 { font-size: 1.4rem !important; }
+}
+
+@media (max-width: 400px) {
+  .url-dissector { font-size: 0.85rem; }
 }

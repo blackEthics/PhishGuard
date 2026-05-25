@@ -5,6 +5,19 @@
   if (!vizBtn) return;  // not on the visualizer page
 
   let _angleChart = null;
+  let _running = false;
+  const vizError = document.getElementById("vizError");
+
+  function showError(msg) {
+    if (!vizError) return;
+    vizError.textContent = msg;
+    vizError.classList.remove("d-none");
+  }
+  function clearError() {
+    if (!vizError) return;
+    vizError.classList.add("d-none");
+    vizError.textContent = "";
+  }
 
   vizBtn.addEventListener("click", runVisualize);
   document.getElementById("vizUrlInput").addEventListener("keydown", e => {
@@ -12,13 +25,16 @@
   });
 
   async function runVisualize() {
+    if (_running) return;
     const url = document.getElementById("vizUrlInput").value.trim();
     if (!url) {
       document.getElementById("vizUrlInput").classList.add("is-invalid");
       return;
     }
     document.getElementById("vizUrlInput").classList.remove("is-invalid");
+    clearError();
 
+    _running = true;
     document.getElementById("vizSpinner").classList.remove("d-none");
     document.getElementById("vizResults").classList.add("d-none");
     vizBtn.disabled = true;
@@ -29,8 +45,9 @@
       if (!resp.ok) throw new Error(data.error || resp.status);
       renderVisualizer(data);
     } catch (err) {
-      alert("Error: " + err.message);
+      showError("Error: " + err.message);
     } finally {
+      _running = false;
       document.getElementById("vizSpinner").classList.add("d-none");
       vizBtn.disabled = false;
     }
@@ -39,6 +56,18 @@
   function renderVisualizer(data) {
     const { angles, n_qubits, n_layers } = data;
     const PI = Math.PI;
+
+    // Show the results section FIRST so the chart container has real pixel
+    // dimensions when Chart.js measures it. Creating a chart while the
+    // ancestor has d-none gives 0×0 dimensions; the ResizeObserver then
+    // fires repeatedly as content below (circuit table, pipeline steps)
+    // causes the h-100 card to grow, causing the continuous-increase blink.
+    const vizResults = document.getElementById("vizResults");
+    vizResults.classList.remove("d-none");
+    // Force a synchronous layout reflow so the browser assigns correct pixel
+    // dimensions to the chart container before Chart.js reads them.
+    // eslint-disable-next-line no-unused-expressions
+    void vizResults.offsetHeight;
 
     // Angle bar chart — coloured by value (blue=low, green=mid, red=high)
     if (_angleChart) _angleChart.destroy();
@@ -61,6 +90,7 @@
       },
       options: {
         responsive: true,
+        maintainAspectRatio: false,
         plugins: { legend: { display: false } },
         scales: {
           y: {
@@ -136,7 +166,6 @@
         </div>
       </div>`).join("");
 
-    document.getElementById("vizResults").classList.remove("d-none");
   }
 
   function renderCircuitDiagram(angles, n_qubits, n_layers) {

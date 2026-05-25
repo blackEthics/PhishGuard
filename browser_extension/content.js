@@ -21,6 +21,13 @@
   let currentLink  = null;
   let lastMouseEvt = null;  // always holds the latest mousemove event
 
+  // Inject keyframe stylesheet once so showLoadingTooltip doesn't duplicate <style> tags
+  (function injectStyles() {
+    const s = document.createElement("style");
+    s.textContent = "@keyframes phishguard-spin { to { transform: rotate(360deg); } }";
+    document.documentElement.appendChild(s);
+  })();
+
   document.addEventListener("mousemove", (e) => { lastMouseEvt = e; }, true);
 
   // ---------------------------------------------------------------------------
@@ -75,9 +82,6 @@
         "></span>
         Scanning with PhishGuard…
       </div>
-      <style>
-        @keyframes phishguard-spin { to { transform: rotate(360deg); } }
-      </style>
     `;
     positionTooltip(e);
     tip.style.display = "block";
@@ -185,68 +189,76 @@
       fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
     });
 
-    overlay.innerHTML = `
-      <div style="
-        background:#1a1a2e;
-        border:2px solid #dc3545;
-        border-radius:18px;
-        padding:44px 40px;
-        max-width:520px;
-        width:90%;
-        text-align:center;
-        color:#e0e0e0;
-        box-shadow:0 8px 48px rgba(220,53,69,0.25);
-        animation:phishguard-fadein 0.3s ease;
-      ">
-        <div style="font-size:64px;margin-bottom:16px;">⚠️</div>
-        <h2 style="color:#dc3545;margin:0 0 12px;font-size:22px;font-weight:700;">
-          Phishing Page Detected
-        </h2>
-        <p style="color:#999;font-size:14px;line-height:1.6;margin-bottom:20px;">
-          PhishGuard flagged this page as a likely phishing site.<br>
-          <strong style="color:#dc3545;">${votes} of ${total} models</strong>
-          (${pct}%) identified it as malicious.
-        </p>
-        <div style="
-          background:#0d0d1a;
-          border-left:3px solid #dc3545;
-          border-radius:0 8px 8px 0;
-          padding:12px 14px;
-          margin-bottom:24px;
-          text-align:left;
-          word-break:break-all;
-          font-size:12px;
-          color:#777;
-        ">${url}</div>
-        <div style="display:flex;gap:12px;justify-content:center;">
-          <button id="phishguard-back" style="
-            background:#198754;color:white;border:none;
-            padding:12px 26px;border-radius:10px;cursor:pointer;
-            font-size:14px;font-weight:600;
-          ">← Go Back (Safe)</button>
-          <button id="phishguard-proceed" style="
-            background:transparent;color:#dc3545;
-            border:1px solid #dc3545;
-            padding:12px 26px;border-radius:10px;cursor:pointer;font-size:14px;
-          ">Proceed Anyway</button>
-        </div>
-        <p style="margin-top:16px;font-size:11px;color:#444;">
-          Powered by PhishGuard · Quantum-Classical ML
-        </p>
-      </div>
-      <style>
-        @keyframes phishguard-fadein {
-          from { opacity:0; transform:translateY(-14px); }
-          to   { opacity:1; transform:translateY(0); }
-        }
-      </style>
-    `;
+    // Build overlay with DOM APIs to avoid XSS from URL content in innerHTML
+    const card = document.createElement("div");
+    Object.assign(card.style, {
+      background: "#1a1a2e", border: "2px solid #dc3545", borderRadius: "18px",
+      padding: "44px 40px", maxWidth: "520px", width: "90%", textAlign: "center",
+      color: "#e0e0e0", boxShadow: "0 8px 48px rgba(220,53,69,0.25)",
+      animation: "phishguard-fadein 0.3s ease",
+    });
+
+    const shield = document.createElement("div");
+    shield.setAttribute("aria-hidden", "true");
+    shield.style.cssText = "font-size:64px;margin-bottom:16px;";
+    shield.textContent = "⚠️";
+
+    const heading = document.createElement("h2");
+    heading.style.cssText = "color:#dc3545;margin:0 0 12px;font-size:22px;font-weight:700;";
+    heading.textContent = "Phishing Page Detected";
+
+    const desc = document.createElement("p");
+    desc.style.cssText = "color:#999;font-size:14px;line-height:1.6;margin-bottom:20px;";
+    desc.innerHTML = `PhishGuard flagged this page as a likely phishing site.<br>
+      <strong style="color:#dc3545;">${votes} of ${total} models</strong>
+      (${pct}%) identified it as malicious.`;
+
+    const urlBox = document.createElement("div");
+    Object.assign(urlBox.style, {
+      background: "#0d0d1a", borderLeft: "3px solid #dc3545", borderRadius: "0 8px 8px 0",
+      padding: "12px 14px", marginBottom: "24px", textAlign: "left",
+      wordBreak: "break-all", fontSize: "12px", color: "#777",
+    });
+    urlBox.textContent = url; // safe — textContent never executes HTML
+
+    const actions = document.createElement("div");
+    actions.style.cssText = "display:flex;gap:12px;justify-content:center;flex-wrap:wrap;";
+
+    const backBtn = document.createElement("button");
+    backBtn.id = "phishguard-back";
+    backBtn.style.cssText = "background:#198754;color:white;border:none;padding:12px 26px;border-radius:10px;cursor:pointer;font-size:14px;font-weight:600;";
+    backBtn.textContent = "← Go Back (Safe)";
+
+    const proceedBtn = document.createElement("button");
+    proceedBtn.id = "phishguard-proceed";
+    proceedBtn.style.cssText = "background:transparent;color:#dc3545;border:1px solid #dc3545;padding:12px 26px;border-radius:10px;cursor:pointer;font-size:14px;";
+    proceedBtn.textContent = "Proceed Anyway";
+
+    actions.appendChild(backBtn);
+    actions.appendChild(proceedBtn);
+
+    const footer = document.createElement("p");
+    footer.style.cssText = "margin-top:16px;font-size:11px;color:#444;";
+    footer.textContent = "Powered by PhishGuard · Quantum-Classical ML";
+
+    // Inject once-used keyframe for card entrance animation
+    const fadeinStyle = document.createElement("style");
+    fadeinStyle.textContent = "@keyframes phishguard-fadein { from { opacity:0; transform:translateY(-14px); } to { opacity:1; transform:translateY(0); } }";
+    card.appendChild(fadeinStyle);
+
+    card.appendChild(shield);
+    card.appendChild(heading);
+    card.appendChild(desc);
+    card.appendChild(urlBox);
+    card.appendChild(actions);
+    card.appendChild(footer);
+    overlay.appendChild(card);
 
     document.body.appendChild(overlay);
     document.body.style.overflow = "hidden";
 
-    document.getElementById("phishguard-back").onclick = () => window.history.back();
-    document.getElementById("phishguard-proceed").onclick = () => {
+    backBtn.onclick = () => window.history.back();
+    proceedBtn.onclick = () => {
       overlay.remove();
       document.body.style.overflow = "";
     };

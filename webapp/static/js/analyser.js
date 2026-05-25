@@ -5,8 +5,22 @@ document.addEventListener("DOMContentLoaded", () => {
   const scanBtn      = document.getElementById("scanBtn");
   const urlInput     = document.getElementById("urlInput");
   const quantumToggle = document.getElementById("quantumToggle");
+  const scanError    = document.getElementById("scanError");
 
   if (!scanBtn) return;  // not on the analyser page
+
+  let _scanning = false;
+
+  function showError(msg) {
+    if (!scanError) return;
+    scanError.textContent = msg;
+    scanError.classList.remove("d-none");
+  }
+  function clearError() {
+    if (!scanError) return;
+    scanError.classList.add("d-none");
+    scanError.textContent = "";
+  }
 
   // Pre-fill URL from ?url= query parameter (used by the browser extension link)
   const _prefilledUrl = new URLSearchParams(window.location.search).get("url");
@@ -19,10 +33,13 @@ document.addEventListener("DOMContentLoaded", () => {
   urlInput.addEventListener("keydown", (e) => { if (e.key === "Enter") runScan(); });
 
   async function runScan() {
+    if (_scanning) return;
     const url = urlInput.value.trim();
     if (!url) { urlInput.classList.add("is-invalid"); return; }
     urlInput.classList.remove("is-invalid");
+    clearError();
 
+    _scanning = true;
     setSpinner(true, quantumToggle.checked
       ? "Running all 9 models… quantum models may take ~30 seconds."
       : "Running 6 classical models…");
@@ -40,8 +57,9 @@ document.addEventListener("DOMContentLoaded", () => {
       const data = await resp.json();
       renderResults(data);
     } catch (err) {
-      alert("Scan failed: " + err.message);
+      showError("Scan failed: " + err.message);
     } finally {
+      _scanning = false;
       setSpinner(false);
     }
   }
@@ -117,7 +135,10 @@ document.addEventListener("DOMContentLoaded", () => {
           <td><span class="badge ${meta.type === "Quantum" ? "bg-purple" : "bg-secondary"}">${meta.type}</span></td>
           <td><span class="badge ${bad ? "bg-danger" : "bg-success"}">${bad ? "Phishing" : "Safe"}</span></td>
           <td>
-            <div class="progress" style="height:6px;min-width:80px">
+            <div class="progress" style="height:6px;min-width:80px"
+                 role="progressbar"
+                 aria-valuenow="${conf}" aria-valuemin="0" aria-valuemax="100"
+                 aria-label="${meta.name} confidence ${conf}%">
               <div class="progress-bar ${bad ? "bg-danger" : "bg-success"}"
                    style="width:${conf}%"></div>
             </div>

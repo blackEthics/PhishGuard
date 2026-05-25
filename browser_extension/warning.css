@@ -63,6 +63,7 @@ h1 {
 /* Stat row */
 .stats {
   display: flex;
+  flex-wrap: wrap;
   gap: 12px;
   justify-content: center;
   margin-bottom: 24px;
@@ -126,6 +127,7 @@ h1 {
 /* Actions */
 .actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 12px;
   justify-content: center;
   margin-bottom: 22px;
@@ -171,3 +173,11 @@ h1 {
 }
 
 .footer-links a:hover { text-decoration: underline; }
+
+@media (max-width: 480px) {
+  .card { padding: 28px 20px 24px; }
+  .page { padding: 16px; }
+  .stat { padding: 12px 14px; min-width: 80px; }
+  .stat-val { font-size: 20px; }
+  .btn-safe, .btn-risk { padding: 11px 18px; font-size: 13px; }
+}

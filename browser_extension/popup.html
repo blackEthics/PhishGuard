@@ -28,6 +28,10 @@
     <p class="scanning-label">Scanning with 6 ML models…</p>
   </div>
 
+  <!-- Live region: announces state changes to screen readers -->
+  <div id="sr-live" aria-live="polite" aria-atomic="true" class="visually-hidden"
+       style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;"></div>
+
   <!-- Result state -->
   <div id="state-result" class="state hidden">
     <div class="verdict-icon" id="verdict-icon"></div>
@@ -50,7 +54,7 @@
     <a id="webapp-link" href="http://localhost:5000" target="_blank">
       Open PhishGuard Web App →
     </a>
-    <button id="rescan-btn" class="rescan" title="Rescan this URL">↺</button>
+    <button id="rescan-btn" class="rescan" title="Rescan this URL" aria-label="Rescan this URL">↺</button>
   </footer>
 
   <script src="popup.js"></script>

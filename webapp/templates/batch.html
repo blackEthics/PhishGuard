@@ -16,20 +16,23 @@
 
         <div class="row g-3 align-items-end">
           <div class="col-sm-6">
-            <label class="form-label fw-semibold">CSV File</label>
-            <input id="batchFile" type="file" class="form-control" accept=".csv">
+            <label for="batchFile" class="form-label fw-semibold">CSV File</label>
+            <input id="batchFile" type="file" class="form-control" accept=".csv"
+                   aria-describedby="batchFileHelp">
           </div>
           <div class="col-sm-3">
-            <label class="form-label fw-semibold">Max URLs</label>
-            <input id="batchMax" type="number" class="form-control" value="200" min="1" max="1000">
+            <label for="batchMax" class="form-label fw-semibold">Max URLs</label>
+            <input id="batchMax" type="number" class="form-control" value="200" min="1" max="1000"
+                   aria-describedby="batchFileHelp">
           </div>
           <div class="col-sm-3 d-grid">
             <button id="batchBtn" class="btn btn-primary btn-lg" type="button">Scan All</button>
           </div>
         </div>
+        <div id="batchError" class="alert alert-danger d-none mt-2 py-2" role="alert"></div>
 
         <div class="mt-2">
-          <small class="text-muted">
+          <small id="batchFileHelp" class="text-muted">
             Quantum models are skipped in batch mode for speed.
             Cap: 1 000 URLs per upload. Maximum file size: 5 MB.
           </small>
@@ -38,8 +41,10 @@
     </div>
 
     <!-- ── Spinner ── -->
-    <div id="batchSpinner" class="text-center py-5 d-none">
-      <div class="spinner-border text-primary" role="status" style="width:3rem;height:3rem;"></div>
+    <div id="batchSpinner" class="text-center py-5 d-none" aria-live="polite" aria-busy="true">
+      <div class="spinner-border text-primary" role="status" style="width:3rem;height:3rem;">
+        <span class="visually-hidden">Loading…</span>
+      </div>
       <p class="mt-3 text-muted" id="batchSpinnerMsg">Scanning URLs…</p>
     </div>
 
@@ -55,7 +60,9 @@
           <div class="card shadow-sm h-100">
             <div class="card-header fw-semibold">Safe vs Phishing</div>
             <div class="card-body d-flex align-items-center justify-content-center">
-              <canvas id="pieChart" style="max-height:220px"></canvas>
+              <div class="chart-container" style="height:220px;width:100%">
+                <canvas id="pieChart" aria-label="Doughnut chart: safe vs phishing URL counts" role="img"></canvas>
+              </div>
             </div>
           </div>
         </div>
@@ -63,7 +70,9 @@
           <div class="card shadow-sm h-100">
             <div class="card-header fw-semibold">Phishing Detections per Model</div>
             <div class="card-body">
-              <canvas id="barChart" style="max-height:220px"></canvas>
+              <div class="chart-container" style="height:220px">
+                <canvas id="barChart" aria-label="Bar chart: phishing detections per model" role="img"></canvas>
+              </div>
             </div>
           </div>
         </div>
@@ -85,7 +94,8 @@
             ⬇ Download security_report.csv
           </button>
         </div>
-        <div class="table-responsive" style="max-height:480px; overflow-y:auto;">
+        <div class="table-responsive table-scroll-wrap" style="max-height:480px; overflow-y:auto;"
+             role="region" aria-label="URL scan results table">
           <table class="table table-sm table-hover table-striped mb-0">
             <thead class="table-dark sticky-top">
               <tr>

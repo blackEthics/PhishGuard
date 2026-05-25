@@ -8,6 +8,18 @@
   let _pieChart = null;
   let _barChart = null;
 
+  const batchError = document.getElementById("batchError");
+  function showError(msg) {
+    if (!batchError) return;
+    batchError.textContent = msg;
+    batchError.classList.remove("d-none");
+  }
+  function clearError() {
+    if (!batchError) return;
+    batchError.classList.add("d-none");
+    batchError.textContent = "";
+  }
+
   batchBtn.addEventListener("click", runBatch);
 
   async function runBatch() {
@@ -19,6 +31,7 @@
       return;
     }
     fileInput.classList.remove("is-invalid");
+    clearError();
 
     setBatchSpinner(true, `Scanning up to ${maxUrls} URLs — please wait…`);
 
@@ -29,10 +42,10 @@
     try {
       const resp = await fetch("/api/batch", { method: "POST", body: formData });
       const data = await resp.json();
-      if (!resp.ok) { alert("Error: " + (data.error || resp.status)); return; }
+      if (!resp.ok) { showError("Error: " + (data.error || resp.status)); return; }
       renderBatchResults(data);
     } catch (err) {
-      alert("Batch scan failed: " + err.message);
+      showError("Batch scan failed: " + err.message);
     } finally {
       setBatchSpinner(false);
     }
@@ -46,6 +59,12 @@
   }
 
   function renderBatchResults(data) {
+    // Show the results section first so chart containers have real pixel
+    // dimensions before Chart.js measures them (same fix as visualizer).
+    const batchResultsEl = document.getElementById("batchResults");
+    batchResultsEl.classList.remove("d-none");
+    void batchResultsEl.offsetHeight; // force synchronous layout reflow
+
     // Summary cards
     const cards = [
       { label: "Total Scanned", value: data.total,              color: "primary",  icon: "🔍" },
@@ -78,6 +97,8 @@
         }],
       },
       options: {
+        responsive: true,
+        maintainAspectRatio: false,
         plugins: { legend: { position: "bottom" } },
         cutout: "60%",
       },
@@ -108,6 +129,7 @@
       },
       options: {
         responsive: true,
+        maintainAspectRatio: false,
         plugins: { legend: { display: false } },
         scales: {
           y: { beginAtZero: true, max: data.total, ticks: { stepSize: 1 } },
@@ -117,7 +139,7 @@
 
     // Top TLDs
     const tldHtml = data.top_tlds.map(t =>
-      `<span class="badge bg-secondary me-2 mb-1 fs-6">${escHtml(t.tld)} <span class="badge bg-light text-dark ms-1">${t.count}</span></span>`
+      `<span class="badge bg-secondary me-2 mb-1" style="font-size:0.85rem">${escHtml(t.tld)} <span class="badge bg-light text-dark ms-1">${t.count}</span></span>`
     ).join("") || "<span class='text-muted'>No TLD data</span>";
     document.getElementById("tldBadges").innerHTML = tldHtml;
 
@@ -138,8 +160,6 @@
 
     // Download button
     document.getElementById("downloadBtn").onclick = () => downloadCSV(data.results);
-
-    document.getElementById("batchResults").classList.remove("d-none");
   }
 
   function downloadCSV(results) {

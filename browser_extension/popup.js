@@ -33,6 +33,7 @@
   const currentUrlEl = document.getElementById("current-url");
   const webappLink   = document.getElementById("webapp-link");
   const rescanBtn    = document.getElementById("rescan-btn");
+  const srLive       = document.getElementById("sr-live");
 
   let activeTabUrl = "";
 
@@ -65,6 +66,12 @@
     verdictIcon.textContent  = isPhishing ? "⚠️" : "✅";
     verdictLabel.textContent = isPhishing ? "PHISHING" : "SAFE";
     verdictLabel.className   = `verdict-label ${isPhishing ? "phishing" : "safe"}`;
+
+    if (srLive) {
+      srLive.textContent = isPhishing
+        ? `Phishing detected: ${phishing_votes} of ${total_models} models flagged this URL.`
+        : `Safe URL: ${phishing_votes} of ${total_models} models flagged this URL.`;
+    }
 
     voteFill.style.width = pct + "%";
     voteFill.className   = `vote-fill ${isPhishing ? "phish-fill" : "safe-fill"}`;

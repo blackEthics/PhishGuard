@@ -115,6 +115,7 @@
         },
         options: {
           responsive: true,
+          maintainAspectRatio: false,
           plugins: { legend: { position: "top" } },
           scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } },
         },
@@ -136,6 +137,8 @@
           }],
         },
         options: {
+          responsive: true,
+          maintainAspectRatio: false,
           plugins: { legend: { position: "bottom" } },
           cutout: "60%",
         },
@@ -164,6 +167,7 @@
         options: {
           indexAxis: "y",
           responsive: true,
+          maintainAspectRatio: false,
           plugins: { legend: { display: false } },
           scales: {
             x: {
@@ -197,6 +201,7 @@
         },
         options: {
           responsive: true,
+          maintainAspectRatio: false,
           plugins: {
             legend: { display: false },
             tooltip: {
@@ -247,6 +252,7 @@
         },
         options: {
           responsive: true,
+          maintainAspectRatio: false,
           plugins: { legend: { display: false } },
           scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } },
         },
