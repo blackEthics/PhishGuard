@@ -1,0 +1,74 @@
+/* Slightly increase navbar brand font size */
+.navbar-brand {
+    font-size: 1.4rem;
+    font-weight: 700;
+}
+
+/* Main content breathing room */
+main.container {
+    min-height: 80vh;
+    padding-bottom: 3rem;
+}
+
+/* Footer */
+footer {
+    background-color: #212529;
+    color: #adb5bd;
+    text-align: center;
+    padding: 1rem 0;
+    font-size: 0.85rem;
+}
+
+/* ── Verdict Banner ─────────────────────────────────── */
+.verdict-banner {
+  border-radius: 0.75rem;
+  transition: background-color 0.3s ease;
+}
+.verdict-icon { line-height: 1; }
+
+/* ── URL Dissector ──────────────────────────────────── */
+.url-dissector {
+  font-size: 1rem;
+  line-height: 2.2;
+  word-break: break-all;
+}
+.url-part {
+  display: inline-block;
+  padding: 0.15rem 0.35rem;
+  border-radius: 0.3rem;
+  margin: 0 1px;
+  cursor: default;
+  border-bottom: 2px solid transparent;
+  transition: opacity 0.15s;
+}
+.url-part:hover { opacity: 0.8; }
+
+.url-safe    { background: #d1e7dd; border-color: #198754; color: #0f5132; }
+.url-danger  { background: #f8d7da; border-color: #dc3545; color: #842029; }
+.url-warn    { background: #fff3cd; border-color: #fd7e14; color: #664d03; }
+.url-neutral { background: #e9ecef; border-color: #adb5bd; color: #495057; }
+
+/* ── Quantum badge colour ───────────────────────────── */
+.bg-purple { background-color: #6f42c1 !important; color: #fff; }
+
+/* ── Progress bar in table ──────────────────────────── */
+.progress { border-radius: 3px; }
+
+/* ── Batch Scanner ──────────────────────────────────── */
+.table-danger-subtle { background-color: #fff5f5; }
+
+/* sticky table header inside scrollable div */
+.sticky-top { position: sticky; top: 0; z-index: 1; }
+
+/* summary card icon sizing */
+.card-body .fs-2 { font-size: 1.8rem !important; }
+
+/* ── Analytics Dashboard ───────────────────────────────── */
+.dash-card-icon {
+  font-size: 1.6rem;
+  line-height: 1.4;
+}
+
+@media (max-width: 576px) {
+  .card-body { padding: 0.6rem !important; }
+}

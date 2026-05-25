@@ -1,0 +1,73 @@
+"""api/scan.py — Blueprint for single-URL scan, health, stats, and history endpoints."""
+
+import time
+
+from flask import Blueprint, jsonify, request
+
+import models.loader as loader
+import database.db as db
+from api.helpers import safe_int
+
+scan_bp = Blueprint("scan", __name__)
+
+_MAX_URL_LENGTH = 2048
+
+
+@scan_bp.route("/api/health")
+def api_health():
+    return jsonify({"status": "ok", "initialized": loader._initialized})
+
+
+@scan_bp.route("/api/scan", methods=["POST"])
+def api_scan():
+    """Accept a URL, run all models, return JSON results.
+
+    Request body (JSON): {"url": "...", "include_quantum": true/false}
+    Returns: full predict_all dict + scan metadata.
+    """
+    body = request.get_json(silent=True) or {}
+    url = (body.get("url") or "").strip()
+    include_quantum = bool(body.get("include_quantum", True))
+
+    if not url:
+        return jsonify({"error": "url is required"}), 400
+    if len(url) > _MAX_URL_LENGTH:
+        return jsonify({"error": f"URL too long (max {_MAX_URL_LENGTH} characters)"}), 400
+
+    t_start = time.time()
+    try:
+        results = loader.predict_all(url, include_quantum=include_quantum)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 503
+
+    elapsed = round((time.time() - t_start) * 1000)
+
+    verdict = results["ensemble"]["verdict"]
+    confidence = results["ensemble"]["confidence"]  # now always present
+
+    db.save_scan(url, verdict, confidence, results)
+
+    results["meta"] = {
+        "url":             url,
+        "total_time_ms":   elapsed,
+        "include_quantum": include_quantum,
+    }
+    return jsonify(results)
+
+
+@scan_bp.route("/api/stats")
+def api_stats():
+    """Return JSON with totals, daily breakdown, and top TLDs."""
+    return jsonify(db.get_dashboard_stats())
+
+
+@scan_bp.route("/api/history")
+def api_history():
+    """Return the most recent scan records for the history table.
+
+    Query param: limit (int, default 20, max 100).
+    """
+    limit = safe_int(request.args.get("limit"), default=20, min_val=1, max_val=100)
+    return jsonify(db.get_recent_history(limit))

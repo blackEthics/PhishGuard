@@ -1,0 +1,131 @@
+"""api/batch.py — Blueprint for the batch CSV scanner endpoint."""
+
+import csv
+import io
+import json
+
+from flask import Blueprint, jsonify, request
+
+import models.loader as loader
+import database.db as db
+from api.helpers import safe_int
+
+batch_bp = Blueprint("batch", __name__)
+
+BATCH_MAX_URLS = 1000
+_MAX_URL_LENGTH = 2048
+
+
+@batch_bp.route("/api/batch", methods=["POST"])
+def api_batch():
+    """Accept a CSV file upload and scan all URLs using classical models only.
+
+    Form field: "file" — CSV with a column named url/URL/link/urls.
+    Form field: "max_urls" (optional int, default 500, cap 1000).
+    Returns JSON with per-URL results and summary statistics.
+    """
+    if "file" not in request.files:
+        return jsonify({"error": "No file uploaded"}), 400
+
+    f = request.files["file"]
+    if not f.filename or not f.filename.lower().endswith(".csv"):
+        return jsonify({"error": "File must be a .csv"}), 400
+
+    max_urls = safe_int(
+        request.form.get("max_urls"), default=500, min_val=1, max_val=BATCH_MAX_URLS
+    )
+
+    try:
+        content = f.read().decode("utf-8", errors="replace")
+        reader = csv.DictReader(io.StringIO(content))
+    except Exception as exc:
+        return jsonify({"error": f"Could not parse CSV: {exc}"}), 400
+
+    url_col = None
+    for candidate in ["url", "URL", "urls", "link", "links", "address"]:
+        if candidate in (reader.fieldnames or []):
+            url_col = candidate
+            break
+    if url_col is None:
+        return jsonify({
+            "error": "CSV must have a column named 'url', 'link', or 'address'",
+            "columns_found": reader.fieldnames,
+        }), 400
+
+    rows = [r for r in reader if (r.get(url_col) or "").strip()][:max_urls]
+    if not rows:
+        return jsonify({"error": "No URLs found in file"}), 400
+
+    results_list = []
+    db_rows = []
+    model_counts = {"knn": 0, "logreg": 0, "nb": 0, "svm": 0, "rf": 0, "mlp": 0}
+    tld_counts: dict[str, int] = {}
+    classical_model_keys = list(model_counts.keys())
+
+    for row in rows:
+        url = row[url_col].strip()
+
+        # Skip URLs that are too long rather than crashing
+        if len(url) > _MAX_URL_LENGTH:
+            results_list.append({
+                "url":           url[:120] + "…",
+                "verdict":       "error",
+                "confidence":    0.0,
+                "phishing_votes": 0,
+                "total_models":  0,
+            })
+            continue
+
+        pred = loader.predict_all(url, include_quantum=False)
+
+        verdict = pred["ensemble"]["verdict"]
+        phishing_votes = pred["ensemble"]["phishing_votes"]
+
+        # Average confidence over whichever classical models ran
+        active_models = [m for m in classical_model_keys if pred.get(m) is not None]
+        confidence = round(
+            sum(pred[m]["confidence"] for m in active_models) / len(active_models), 4
+        ) if active_models else 0.0
+
+        for m in classical_model_keys:
+            if pred.get(m) and pred[m]["verdict"] == "bad":
+                model_counts[m] += 1
+
+        try:
+            host = url.split("//")[-1].split("/")[0]
+            parts = host.split(".")
+            if len(parts) >= 2:
+                tld = "." + parts[-1]
+                tld_counts[tld] = tld_counts.get(tld, 0) + 1
+        except Exception:
+            pass
+
+        results_list.append({
+            "url":           url,
+            "verdict":       verdict,
+            "confidence":    confidence,
+            "phishing_votes": phishing_votes,
+            "total_models":  pred["ensemble"]["total_models"],
+        })
+
+        # Store per-model detail in the DB row (not empty "{}")
+        model_snapshot = {
+            m: pred[m] for m in classical_model_keys if pred.get(m) is not None
+        }
+        db_rows.append((url, verdict, confidence, json.dumps(model_snapshot)))
+
+    db.save_scans_batch(db_rows)
+
+    phishing_count = sum(1 for r in results_list if r["verdict"] == "bad")
+    total = len(results_list)
+    top_tlds = sorted(tld_counts, key=tld_counts.get, reverse=True)[:5]
+
+    return jsonify({
+        "total":         total,
+        "phishing":      phishing_count,
+        "safe":          total - phishing_count,
+        "phishing_pct":  round(phishing_count / total * 100, 1) if total else 0,
+        "model_counts":  model_counts,
+        "top_tlds":      [{"tld": t, "count": tld_counts[t]} for t in top_tlds],
+        "results":       results_list,
+    })

@@ -1,0 +1,197 @@
+================================================================================
+  PHISHING SITE DETECTION — ACCURACY IMPROVEMENT PLAN
+================================================================================
+
+STATUS: All 6 models improved. Final results recorded below.
+
+BASELINE RESULTS (before improvements)
+---------------------------------------
+  KNN                  : 87.4% accuracy, macro F1 0.84
+  Logistic Regression  : 87.9% accuracy, macro F1 0.84
+  Naive Bayes          : 71.7% accuracy, macro F1 0.42  (broken — predicts all "good")
+  SVM (RBF kernel)     : 88.9% accuracy, macro F1 0.85
+  Random Forest        : 89.6% accuracy, macro F1 0.87
+  MLP Neural Network   : 88.9% accuracy, macro F1 0.85
+
+ROOT CAUSES OF LOW ACCURACY
+-----------------------------
+1. Sample size too small (20k rows from 549k dataset)
+2. TruncatedSVD(100 dims) captures only ~40% of variance — loses too much signal
+3. No class_weight='balanced' — models biased toward majority class "good"
+4. LR and NB don't need SVD at all; it actively hurts them
+5. CountVectorizer instead of TF-IDF (common tokens not downweighted)
+
+================================================================================
+PER-MODEL IMPROVEMENT PLAN
+================================================================================
+
+--------------------------------------------------------------------------------
+MODEL 1: KNN — model_knn/model_knn.ipynb
+--------------------------------------------------------------------------------
+STATUS: Improved — 91.86% accuracy, macro F1 0.90
+
+CHANGES TO MAKE:
+  1. Increase sample size: 20,000 → 50,000 (stratified)
+  2. Increase SVD components: 100 → 200
+     - Fit SVD on train only, transform test
+  3. Switch CountVectorizer → TfidfVectorizer
+     - Fit on train only, transform test (no leakage)
+  4. Tune k: test k=3, 5, 7, 11 with 3-fold cross-validation, pick best
+  5. Add class_weight equivalent: use sample_weight in cross_val_score
+     (KNN has no class_weight param — handle imbalance via stratified sampling)
+  6. Add URL handcrafted features (concatenate with SVD output):
+       - url_length        : len(url)
+       - num_dots          : url.count('.')
+       - num_digits        : sum(c.isdigit() for c in url)
+       - num_special       : count of @, -, _, =, ?, & in url
+       - has_ip            : 1 if re.search(r'\d+\.\d+\.\d+\.\d+', url) else 0
+       - subdomain_depth   : len(url.split('/')[2].split('.')) - 2
+  7. Save updated model to model_knn/result/model_knn.pkl
+  8. Save updated classification report and confusion matrix
+
+ACTUAL RESULT:   91.86% accuracy, macro F1 0.90
+
+FILES TO READ BEFORE STARTING:
+  - preprocessing-dataset/processed_data.csv   (549k rows, cols: URL, Label, processed_text)
+  - preprocessing-dataset/vectorizer.pkl        (fitted CountVectorizer — for vocab reference only,
+                                                 refit a TfidfVectorizer on train split instead)
+  - model_knn/model_knn.ipynb                   (existing notebook to modify)
+
+KEY RULES:
+  - Fit TfidfVectorizer and TruncatedSVD on TRAIN split ONLY
+  - Apply .transform() to test split (never fit on test — data leakage)
+  - Use random_state=42 everywhere for reproducibility
+  - Save all updated artefacts to model_knn/result/
+
+--------------------------------------------------------------------------------
+MODEL 2: LOGISTIC REGRESSION — model_logreg_nb/model_logreg_nb.ipynb
+--------------------------------------------------------------------------------
+STATUS: Improved — 92.49% accuracy, macro F1 0.90
+
+CHANGES MADE:
+  1. Removed TruncatedSVD — LR works natively on sparse matrices
+  2. Full dataset (549k rows) — no sampling; solver='saga' handles it
+  3. Fresh TfidfVectorizer fitted on train split only (vectorizer.pkl not reused)
+  4. class_weight removed — 'balanced' over-penalised the majority class on the 72/28
+     split, causing the model to over-predict "bad" and drop accuracy to ~68%
+  5. LogisticRegression params: solver='saga', max_iter=1000
+  6. 6 handcrafted URL features concatenated via scipy.sparse.hstack:
+       url_length, num_dots, num_digits, num_special, has_ip, subdomain_depth
+  7. Updated artefacts saved to model_logreg_nb/result/
+
+ACTUAL RESULT:   92.49% accuracy, macro F1 0.90
+
+--------------------------------------------------------------------------------
+MODEL 3: NAIVE BAYES — model_logreg_nb/model_logreg_nb.ipynb (same notebook)
+--------------------------------------------------------------------------------
+STATUS: Improved — 96.98% accuracy, macro F1 0.96
+
+ROOT CAUSE OF PREVIOUS FAILURE:
+  TruncatedSVD produced negative values; MultinomialNB requires non-negative input.
+  After shifting, variance collapsed, causing the model to predict every URL as "good".
+
+CHANGES MADE:
+  1. Replaced MultinomialNB with ComplementNB(alpha=0.1)
+     - Estimates class probabilities via complement; robust on imbalanced data
+     - Works directly on TF-IDF sparse matrices — no shifting or SVD required
+  2. Removed TruncatedSVD entirely
+  3. Same TfidfVectorizer as Logistic Regression (fit once, reused)
+  4. Full dataset (549k rows) — no sampling
+  5. Handcrafted features NOT concatenated (ComplementNB bag-of-words weights
+     would be distorted by dense scalar features)
+  6. Updated artefacts saved to model_logreg_nb/result/
+
+ACTUAL RESULT:   96.98% accuracy, macro F1 0.96
+
+--------------------------------------------------------------------------------
+MODEL 4: SVM — model_svm_rbf_kernel/model_svm_rbf_kernel.ipynb
+--------------------------------------------------------------------------------
+STATUS: Improved — 90.37% accuracy, macro F1 0.87
+
+CHANGES MADE:
+  1. Switched SVC(kernel='rbf') → LinearSVC — faster on larger datasets, comparable accuracy
+  2. Increased sample size: 20,000 → 50,000 (stratified by class)
+  3. Increased SVD components: 100 → 200
+  4. Replaced CountVectorizer (loaded from pkl) with fresh TfidfVectorizer fitted on train only
+  5. Added class_weight='balanced' to handle the ~3:1 good/bad imbalance
+  6. LinearSVC params: C=1.0, max_iter=2000, class_weight='balanced', random_state=42
+  7. Wrapped in CalibratedClassifierCV for .predict_proba() support
+  8. Added 6 handcrafted URL features concatenated via np.hstack:
+       url_length, num_dots, num_digits, num_special, has_ip, subdomain_depth
+  9. Updated artefacts saved to model_svm_rbf_kernel/result/
+
+ACTUAL RESULT:   90.37% accuracy, macro F1 0.87
+
+--------------------------------------------------------------------------------
+MODEL 5: RANDOM FOREST — model_random_forest/model_random_forest.ipynb
+--------------------------------------------------------------------------------
+STATUS: Improved — 91.66% accuracy, macro F1 0.89
+
+CHANGES MADE:
+  1. Increased sample size: 20,000 → 100,000 (stratified)
+  2. Increased SVD components: 100 → 200
+  3. Switched CountVectorizer → TfidfVectorizer (fit on train only)
+  4. Added class_weight='balanced' to RandomForestClassifier
+  5. RF params: n_estimators=200, max_depth=None, class_weight='balanced',
+                min_samples_split=2, random_state=42, n_jobs=-1
+  6. Added URL handcrafted features (same 6 features)
+  7. Updated artefacts saved to model_random_forest/result/
+
+ACTUAL RESULT:   91.66% accuracy, macro F1 0.89
+
+--------------------------------------------------------------------------------
+MODEL 6: MLP NEURAL NETWORK — model_mlp_nn/model_mlp_nn.ipynb
+--------------------------------------------------------------------------------
+STATUS: Improved — 92.32% accuracy, macro F1 0.91
+
+CHANGES MADE:
+  1. Increased sample size: 20,000 → 100,000 (stratified)
+  2. Increased SVD components: 100 → 200
+  3. Switched CountVectorizer → fresh TfidfVectorizer (fit on train only)
+  4. Deeper architecture: hidden_layer_sizes=(256, 128, 64) instead of (100, 50)
+  5. Added class balancing via compute_sample_weight('balanced', y_train)
+     passed to mlp.fit(..., sample_weight=sample_weights)
+  6. MLP params: activation='relu', solver='adam', max_iter=500,
+                 early_stopping=True, validation_fraction=0.1, random_state=42
+  7. Added URL handcrafted features (same 6 features)
+  8. Updated artefacts saved to model_mlp_nn/result/
+
+ACTUAL RESULT:   92.32% accuracy, macro F1 0.91
+
+================================================================================
+SHARED URL HANDCRAFTED FEATURES (use in ALL models)
+================================================================================
+
+Add these 6 features by engineering them from the raw URL column BEFORE the
+train/test split, then concatenate with TF-IDF/SVD output:
+
+  import re
+  import numpy as np
+
+  def extract_url_features(url: str) -> list:
+      return [
+          len(url),
+          url.count('.'),
+          sum(c.isdigit() for c in url),
+          sum(c in '@-_=?&' for c in url),
+          1 if re.search(r'\d+\.\d+\.\d+\.\d+', url) else 0,
+          max(0, len(url.split('/')[2].split('.')) - 2) if '//' in url else 0,
+      ]
+
+  url_features = np.array([extract_url_features(u) for u in df['URL']])
+
+For models using sparse TF-IDF: use scipy.sparse.hstack([tfidf_matrix, sparse.csr_matrix(url_features)])
+For models using SVD output (dense): use np.hstack([svd_output, url_features])
+
+================================================================================
+IMPROVEMENT PROGRESS TRACKER
+================================================================================
+
+  [x] KNN                  — 91.86% accuracy, macro F1 0.90
+  [x] Logistic Regression  — 92.49% accuracy, macro F1 0.90
+  [x] Naive Bayes          — 96.98% accuracy, macro F1 0.96
+  [x] SVM                  — 90.37% accuracy, macro F1 0.87
+  [x] Random Forest        — 91.66% accuracy, macro F1 0.89
+  [x] MLP Neural Network   — 92.32% accuracy, macro F1 0.91
+
+================================================================================

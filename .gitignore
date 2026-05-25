@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Large model files — retrained at startup from CSV
+*.pkl
+
+# Large data files
+phishing_site_urls.csv
+
+# Quantum kernel matrices are tracked (.npy) but the DB is not
+webapp/phishguard.db
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Environment / secrets
+.env
+*.env
+
+# Logs
+*.log
+
+# Byte-compiled pycache already covered above
+webapp/api/__pycache__/
+webapp/models/__pycache__/
+webapp/database/__pycache__/
+webapp/__pycache__/

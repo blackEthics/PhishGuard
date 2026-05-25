@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}Analytics — PhishGuard{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-11">
+
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h2 class="mb-0">Analytics Dashboard</h2>
+      <button id="dashRefreshBtn" class="btn btn-sm btn-outline-secondary">&#8635; Refresh</button>
+    </div>
+
+    <!-- Summary Cards -->
+    <div id="dashCards" class="row g-3 mb-4">
+      <div class="col-12 text-center text-muted py-3">Loading&hellip;</div>
+    </div>
+
+    <!-- Row 1: Daily line chart + split doughnut -->
+    <div class="row g-4 mb-4">
+      <div class="col-md-8">
+        <div class="card shadow-sm h-100">
+          <div class="card-header fw-semibold">Scans per Day &mdash; Last 7 Days</div>
+          <div class="card-body">
+            <canvas id="dailyChart" style="max-height:220px"></canvas>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="card shadow-sm h-100">
+          <div class="card-header fw-semibold">All-Time Split</div>
+          <div class="card-body d-flex align-items-center justify-content-center">
+            <canvas id="splitPieChart" style="max-height:220px"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Row 2: Model accuracy bar chart -->
+    <div class="card shadow-sm mb-4">
+      <div class="card-header fw-semibold">Model Accuracy &mdash; Thesis Results</div>
+      <div class="card-body">
+        <div class="alert alert-info py-2 mb-3 small" role="alert">
+          <strong>Note:</strong> Accuracy figures shown are from full-dataset thesis training
+          (440k&ndash;550k samples). The live web app retrains on a 5&thinsp;000-row subset at
+          startup, so live accuracy will be somewhat lower.
+        </div>
+        <canvas id="accuracyChart" style="max-height:260px"></canvas>
+      </div>
+    </div>
+
+    <!-- Row 3: Speed comparison -->
+    <div class="card shadow-sm mb-4">
+      <div class="card-header fw-semibold">
+        Classical vs Quantum &mdash; Prediction Speed (log scale)
+      </div>
+      <div class="card-body">
+        <canvas id="speedChart" style="max-height:200px"></canvas>
+      </div>
+    </div>
+
+    <!-- Row 4: TLD chart -->
+    <div class="card shadow-sm mb-4">
+      <div class="card-header fw-semibold">Top TLDs in Scan History</div>
+      <div class="card-body">
+        <canvas id="tldChart" style="max-height:180px"></canvas>
+        <p id="tldEmpty" class="text-center text-muted d-none mt-2">
+          No scans yet &mdash; scan some URLs first.
+        </p>
+      </div>
+    </div>
+
+    <!-- Recent History Table -->
+    <div class="card shadow-sm mb-4">
+      <div class="card-header fw-semibold">Recent Scan History</div>
+      <div class="table-responsive" style="max-height:400px">
+        <table class="table table-sm table-hover table-striped mb-0">
+          <thead class="table-dark sticky-top">
+            <tr>
+              <th>#</th>
+              <th>URL</th>
+              <th>Verdict</th>
+              <th>Confidence</th>
+              <th>Timestamp</th>
+            </tr>
+          </thead>
+          <tbody id="historyTableBody">
+            <tr><td colspan="5" class="text-center text-muted">Loading&hellip;</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+{% endblock %}
