@@ -1,5 +1,7 @@
 """quantum.py — PennyLane circuit definitions for VQC, QKNN, and QSVM."""
 
+import threading
+
 import numpy as np
 import pennylane as qml
 
@@ -18,6 +20,12 @@ except (ImportError, OSError):
 
 _dev = qml.device("default.qubit", wires=N_QUBITS)
 _VQC_INTERFACE = "torch" if _TORCH_AVAILABLE else "numpy"
+
+# PennyLane's default.qubit device is NOT thread-safe: it maintains internal
+# quantum state that is mutated during circuit execution. Concurrent calls to
+# any qnode sharing the same device produce corrupted results. This lock
+# serialises all device access so only one circuit executes at a time.
+_dev_lock = threading.Lock()
 
 
 @qml.qnode(_dev, interface=_VQC_INTERFACE)
@@ -91,11 +99,19 @@ def qsvm_kernel_circuit(x1: np.ndarray, x2: np.ndarray) -> np.ndarray:
     return qml.probs(wires=range(N_QUBITS))
 
 
+def vqc_predict(x, params):
+    """Thread-safe VQC forward pass. Returns raw qnode output."""
+    with _dev_lock:
+        return vqc_circuit(x, params)
+
+
 def quantum_fidelity(x1: np.ndarray, x2: np.ndarray) -> float:
     """Scalar QKNN fidelity F(x1, x2) = probs[0] of the fidelity circuit."""
-    return float(fidelity_circuit(x1, x2)[0])
+    with _dev_lock:
+        return float(fidelity_circuit(x1, x2)[0])
 
 
 def quantum_kernel(x1: np.ndarray, x2: np.ndarray) -> float:
     """Scalar QSVM kernel K(x1, x2) = probs[0] of the IQP kernel circuit."""
-    return float(qsvm_kernel_circuit(x1, x2)[0])
+    with _dev_lock:
+        return float(qsvm_kernel_circuit(x1, x2)[0])

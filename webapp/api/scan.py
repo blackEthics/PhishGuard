@@ -1,21 +1,21 @@
 """api/scan.py — Blueprint for single-URL scan, health, stats, and history endpoints."""
 
+import logging
 import time
 
 from flask import Blueprint, jsonify, request
 
 import models.loader as loader
 import database.db as db
-from api.helpers import safe_int
+from api.helpers import safe_int, MAX_URL_LENGTH
 
+logger = logging.getLogger(__name__)
 scan_bp = Blueprint("scan", __name__)
-
-_MAX_URL_LENGTH = 2048
 
 
 @scan_bp.route("/api/health")
 def api_health():
-    return jsonify({"status": "ok", "initialized": loader._initialized})
+    return jsonify({"status": "ok", "initialized": loader.is_initialized()})
 
 
 @scan_bp.route("/api/scan", methods=["POST"])
@@ -31,10 +31,10 @@ def api_scan():
 
     if not url:
         return jsonify({"error": "url is required"}), 400
-    if len(url) > _MAX_URL_LENGTH:
-        return jsonify({"error": f"URL too long (max {_MAX_URL_LENGTH} characters)"}), 400
+    if len(url) > MAX_URL_LENGTH:
+        return jsonify({"error": f"URL too long (max {MAX_URL_LENGTH} characters)"}), 400
 
-    t_start = time.time()
+    t_start = time.monotonic()
     try:
         results = loader.predict_all(url, include_quantum=include_quantum)
     except ValueError as exc:
@@ -42,12 +42,16 @@ def api_scan():
     except RuntimeError as exc:
         return jsonify({"error": str(exc)}), 503
 
-    elapsed = round((time.time() - t_start) * 1000)
+    elapsed = round((time.monotonic() - t_start) * 1000)
 
     verdict = results["ensemble"]["verdict"]
-    confidence = results["ensemble"]["confidence"]  # now always present
+    confidence = results["ensemble"]["confidence"]
 
-    db.save_scan(url, verdict, confidence, results)
+    try:
+        db.save_scan(url, verdict, confidence, results)
+    except Exception:
+        # A DB write failure must not turn a successful scan into a 500 error.
+        logger.exception("Failed to persist scan for %s", url)
 
     results["meta"] = {
         "url":             url,

@@ -1,12 +1,14 @@
 """api/circuit.py — Blueprint for the quantum circuit visualizer endpoint."""
 
+import logging
+
 from flask import Blueprint, jsonify, request
 
 import models.loader as loader
+from api.helpers import MAX_URL_LENGTH
 
+logger = logging.getLogger(__name__)
 circuit_bp = Blueprint("circuit", __name__)
-
-_MAX_URL_LENGTH = 2048
 
 
 @circuit_bp.route("/api/circuit")
@@ -19,16 +21,17 @@ def api_circuit():
     url = request.args.get("url", "").strip()
     if not url:
         return jsonify({"error": "url is required"}), 400
-    if len(url) > _MAX_URL_LENGTH:
-        return jsonify({"error": f"URL too long (max {_MAX_URL_LENGTH} characters)"}), 400
+    if len(url) > MAX_URL_LENGTH:
+        return jsonify({"error": f"URL too long (max {MAX_URL_LENGTH} characters)"}), 400
 
-    if not loader._initialized:
+    if not loader.is_initialized():
         return jsonify({"error": "Models not yet loaded — try again in a moment"}), 503
 
     try:
         angles = loader.get_angles_for_url(url)
-    except Exception as exc:
-        return jsonify({"error": f"Could not compute angles: {exc}"}), 500
+    except Exception:
+        logger.exception("get_angles_for_url failed for %r", url[:80])
+        return jsonify({"error": "Could not compute angles for this URL"}), 500
 
     return jsonify({
         "url":      url,

@@ -1,4 +1,8 @@
+"""PhishGuard — Flask application entry point."""
+
+import logging
 import os
+import sys
 
 from flask import Flask, jsonify, render_template, request
 
@@ -7,6 +11,17 @@ from api.batch import batch_bp
 from api.circuit import circuit_bp
 import models.loader as loader
 import database.db as db
+
+# ---------------------------------------------------------------------------
+# Logging — configured once here, before any module emits a log record.
+# ---------------------------------------------------------------------------
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    stream=sys.stdout,
+)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
@@ -44,6 +59,11 @@ def add_headers(response):
     response.headers["Access-Control-Allow-Headers"] = "Content-Type"
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
 
+    # Ensure browser CORS preflight (OPTIONS) always gets 200 so the real
+    # request is not blocked by a 405 Method Not Allowed.
+    if request.method == "OPTIONS":
+        response.status_code = 200
+
     # Security headers
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
@@ -58,8 +78,19 @@ def add_headers(response):
 
 
 # ---------------------------------------------------------------------------
-# Error handlers
+# Error handlers — return JSON for all API-facing errors so that
+# the browser extension never receives an unexpected HTML error page.
 # ---------------------------------------------------------------------------
+@app.errorhandler(400)
+def bad_request(e):
+    return jsonify({"error": "Bad request"}), 400
+
+
+@app.errorhandler(404)
+def not_found(e):
+    return jsonify({"error": "Not found"}), 404
+
+
 @app.errorhandler(413)
 def request_too_large(e):
     return jsonify({"error": "File too large — maximum 5 MB allowed"}), 413
@@ -67,6 +98,7 @@ def request_too_large(e):
 
 @app.errorhandler(500)
 def internal_error(e):
+    logger.exception("Unhandled internal server error")
     return jsonify({"error": "Internal server error"}), 500
 
 
@@ -99,8 +131,17 @@ def visualizer():
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
     with app.app_context():
-        loader.initialize()
+        # Database must be initialised first so it is ready when models load.
         db.init_db()
+        logger.info("Database initialised at %s", db.DB_PATH)
+        try:
+            loader.initialize()
+        except FileNotFoundError as exc:
+            logger.critical("Dataset not found — cannot start: %s", exc)
+            sys.exit(1)
+        except Exception as exc:
+            logger.critical("Model initialisation failed: %s", exc, exc_info=True)
+            sys.exit(1)
     app.run(
         host="127.0.0.1",
         port=5000,

@@ -83,6 +83,7 @@ def _fake_predict_all(url: str, include_quantum: bool = True) -> dict:
         "verdict": verdict,
         "phishing_votes": bad_votes,
         "total_models": 6,
+        "confidence": conf,
     }
     result["url_features"] = {
         "length": len(url), "dots": url.count("."),

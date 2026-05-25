@@ -3,17 +3,18 @@
 import csv
 import io
 import json
+import logging
 
 from flask import Blueprint, jsonify, request
 
 import models.loader as loader
 import database.db as db
-from api.helpers import safe_int
+from api.helpers import safe_int, MAX_URL_LENGTH
 
+logger = logging.getLogger(__name__)
 batch_bp = Blueprint("batch", __name__)
 
 BATCH_MAX_URLS = 1000
-_MAX_URL_LENGTH = 2048
 
 
 @batch_bp.route("/api/batch", methods=["POST"])
@@ -41,10 +42,12 @@ def api_batch():
     except Exception as exc:
         return jsonify({"error": f"Could not parse CSV: {exc}"}), 400
 
+    # Case-insensitive column name matching so "Url", "URL", "url" all work.
+    fieldnames_lower = {name.lower(): name for name in (reader.fieldnames or [])}
     url_col = None
-    for candidate in ["url", "URL", "urls", "link", "links", "address"]:
-        if candidate in (reader.fieldnames or []):
-            url_col = candidate
+    for candidate in ("url", "urls", "link", "links", "address"):
+        if candidate in fieldnames_lower:
+            url_col = fieldnames_lower[candidate]
             break
     if url_col is None:
         return jsonify({
@@ -65,67 +68,72 @@ def api_batch():
     for row in rows:
         url = row[url_col].strip()
 
-        # Skip URLs that are too long rather than crashing
-        if len(url) > _MAX_URL_LENGTH:
+        # Skip URLs that are too long rather than crashing.
+        if len(url) > MAX_URL_LENGTH:
             results_list.append({
-                "url":           url[:120] + "…",
-                "verdict":       "error",
-                "confidence":    0.0,
+                "url":            url[:120] + "…",
+                "verdict":        "error",
+                "confidence":     0.0,
                 "phishing_votes": 0,
-                "total_models":  0,
+                "total_models":   0,
             })
             continue
 
-        pred = loader.predict_all(url, include_quantum=False)
+        try:
+            pred = loader.predict_all(url, include_quantum=False)
+        except Exception:
+            logger.exception("predict_all failed for url %r — skipping", url[:80])
+            results_list.append({
+                "url":            url,
+                "verdict":        "error",
+                "confidence":     0.0,
+                "phishing_votes": 0,
+                "total_models":   0,
+            })
+            continue
 
-        verdict = pred["ensemble"]["verdict"]
+        verdict    = pred["ensemble"]["verdict"]
+        confidence = pred["ensemble"]["confidence"]  # consistent with single-scan endpoint
         phishing_votes = pred["ensemble"]["phishing_votes"]
-
-        # Average confidence over whichever classical models ran
-        active_models = [m for m in classical_model_keys if pred.get(m) is not None]
-        confidence = round(
-            sum(pred[m]["confidence"] for m in active_models) / len(active_models), 4
-        ) if active_models else 0.0
 
         for m in classical_model_keys:
             if pred.get(m) and pred[m]["verdict"] == "bad":
                 model_counts[m] += 1
 
-        try:
-            host = url.split("//")[-1].split("/")[0]
-            parts = host.split(".")
-            if len(parts) >= 2:
-                tld = "." + parts[-1]
-                tld_counts[tld] = tld_counts.get(tld, 0) + 1
-        except Exception:
-            pass
+        # TLD aggregation reuses the same logic as the DB layer.
+        tld = db._extract_tld(url)
+        if tld:
+            tld_counts[tld] = tld_counts.get(tld, 0) + 1
 
         results_list.append({
-            "url":           url,
-            "verdict":       verdict,
-            "confidence":    confidence,
+            "url":            url,
+            "verdict":        verdict,
+            "confidence":     confidence,
             "phishing_votes": phishing_votes,
-            "total_models":  pred["ensemble"]["total_models"],
+            "total_models":   pred["ensemble"]["total_models"],
         })
 
-        # Store per-model detail in the DB row (not empty "{}")
         model_snapshot = {
             m: pred[m] for m in classical_model_keys if pred.get(m) is not None
         }
         db_rows.append((url, verdict, confidence, json.dumps(model_snapshot)))
 
-    db.save_scans_batch(db_rows)
+    try:
+        db.save_scans_batch(db_rows)
+    except Exception:
+        # A DB write failure must not discard scan results already computed.
+        logger.exception("Failed to persist batch of %d scans", len(db_rows))
 
     phishing_count = sum(1 for r in results_list if r["verdict"] == "bad")
     total = len(results_list)
     top_tlds = sorted(tld_counts, key=tld_counts.get, reverse=True)[:5]
 
     return jsonify({
-        "total":         total,
-        "phishing":      phishing_count,
-        "safe":          total - phishing_count,
-        "phishing_pct":  round(phishing_count / total * 100, 1) if total else 0,
-        "model_counts":  model_counts,
-        "top_tlds":      [{"tld": t, "count": tld_counts[t]} for t in top_tlds],
-        "results":       results_list,
+        "total":        total,
+        "phishing":     phishing_count,
+        "safe":         total - phishing_count,
+        "phishing_pct": round(phishing_count / total * 100, 1) if total else 0,
+        "model_counts": model_counts,
+        "top_tlds":     [{"tld": t, "count": tld_counts[t]} for t in top_tlds],
+        "results":      results_list,
     })

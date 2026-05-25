@@ -1,5 +1,8 @@
 """api/helpers.py — Shared utilities for API blueprints."""
 
+# Single canonical definition; all blueprints import from here.
+MAX_URL_LENGTH = 2048
+
 
 def safe_int(value, default: int, min_val: int | None = None, max_val: int | None = None) -> int:
     """Parse an integer from a request parameter, returning default on failure."""

@@ -1,7 +1,9 @@
 """models/loader.py — Train all 9 PhishGuard models at startup and serve predictions."""
 
+import logging
 import os
 import re
+import threading
 import time
 from typing import Any
 
@@ -26,7 +28,7 @@ from sklearn.ensemble import RandomForestClassifier
 
 from models.quantum import (
     _TORCH_AVAILABLE,
-    vqc_circuit as _vqc_circuit,
+    vqc_predict as _vqc_predict,
     quantum_fidelity as _quantum_fidelity,
     quantum_kernel as _quantum_kernel,
 )
@@ -36,7 +38,14 @@ if _TORCH_AVAILABLE:
 else:
     torch = None  # type: ignore[assignment]
 
-nltk.download("punkt", quiet=True)
+logger = logging.getLogger(__name__)
+
+# Download NLTK data at import time; suppress network errors gracefully.
+try:
+    nltk.download("punkt", quiet=True)
+    nltk.download("punkt_tab", quiet=True)
+except Exception:
+    pass
 
 # ---------------------------------------------------------------------------
 # __file__-relative paths — independent of the shell's working directory.
@@ -116,6 +125,14 @@ _y_qsvm_train: np.ndarray | None = None
 
 _initialized: bool = False
 
+# Prevents two threads from running initialize() simultaneously.
+_init_lock = threading.Lock()
+
+
+def is_initialized() -> bool:
+    """Return True if initialize() has completed successfully."""
+    return _initialized
+
 
 # ---------------------------------------------------------------------------
 # initialize()
@@ -128,209 +145,212 @@ def initialize() -> None:
     global _x_qknn_train, _y_qknn_train, _x_qsvm_train, _y_qsvm_train
     global _initialized
 
-    # ------------------------------------------------------------------
-    # Step 1 — Load & sample data
-    # ------------------------------------------------------------------
-    data_path = LOADER_CONFIG["data_path"]
-    if not os.path.exists(data_path):
-        raise FileNotFoundError(
-            f"[loader] Dataset not found: {data_path}\n"
-            "Run preprocessing-dataset/data_preprocessing.ipynb first."
+    if _initialized:
+        return
+
+    with _init_lock:
+        if _initialized:  # Double-checked locking: re-test after acquiring the lock
+            return
+
+        # ------------------------------------------------------------------
+        # Step 1 — Load & sample data
+        # ------------------------------------------------------------------
+        data_path = LOADER_CONFIG["data_path"]
+        if not os.path.exists(data_path):
+            raise FileNotFoundError(
+                f"[loader] Dataset not found: {data_path}\n"
+                "Run preprocessing-dataset/data_preprocessing.ipynb first."
+            )
+
+        logger.info("Loading data...")
+        df_full = pd.read_csv(data_path)
+        df, _ = train_test_split(
+            df_full,
+            train_size=LOADER_CONFIG["sample_size"],
+            random_state=LOADER_CONFIG["random_state"],
+            stratify=df_full["Label"],
+        )
+        df = df.reset_index(drop=True)
+
+        # ------------------------------------------------------------------
+        # Step 2 — Extract URL features (each row independently, no leakage)
+        # ------------------------------------------------------------------
+        url_features = np.array(
+            [extract_url_features(str(u)) for u in df["URL"].fillna("")]
         )
 
-    print("[loader] Loading data...")
-    rng = np.random.default_rng(LOADER_CONFIG["random_state"])
-    df_full = pd.read_csv(data_path)
-    df, _ = train_test_split(
-        df_full,
-        train_size=LOADER_CONFIG["sample_size"],
-        random_state=LOADER_CONFIG["random_state"],
-        stratify=df_full["Label"],
-    )
-    df = df.reset_index(drop=True)
+        # ------------------------------------------------------------------
+        # Step 3 — 80/20 stratified train/test split
+        # ------------------------------------------------------------------
+        logger.info("Fitting preprocessing pipeline...")
+        (
+            x_train_text, x_test_text,
+            url_feats_train, url_feats_test,
+            y_train, y_test,
+        ) = train_test_split(
+            df["processed_text"].fillna("").astype(str).values,
+            url_features,
+            df["Label"].values,
+            test_size=LOADER_CONFIG["test_size"],
+            random_state=LOADER_CONFIG["random_state"],
+            stratify=df["Label"].values,
+        )
 
-    # ------------------------------------------------------------------
-    # Step 2 — Extract URL features (each row independently, no leakage)
-    # ------------------------------------------------------------------
-    url_features = np.array(
-        [extract_url_features(str(u)) for u in df["URL"].fillna("")]
-    )
+        # ------------------------------------------------------------------
+        # Step 4 — Fit TF-IDF on training text only
+        # ------------------------------------------------------------------
+        _tfidf = TfidfVectorizer(
+            sublinear_tf=True,
+            min_df=2,
+            max_features=LOADER_CONFIG["max_tfidf_features"],
+        )
+        X_tfidf_train = _tfidf.fit_transform(x_train_text)
+        X_tfidf_test = _tfidf.transform(x_test_text)
 
-    # ------------------------------------------------------------------
-    # Step 3 — 80/20 stratified train/test split
-    # ------------------------------------------------------------------
-    print("[loader] Fitting preprocessing pipeline...")
-    (
-        x_train_text, x_test_text,
-        url_feats_train, url_feats_test,
-        y_train, y_test,
-    ) = train_test_split(
-        df["processed_text"].fillna("").astype(str).values,
-        url_features,
-        df["Label"].values,
-        test_size=LOADER_CONFIG["test_size"],
-        random_state=LOADER_CONFIG["random_state"],
-        stratify=df["Label"].values,
-    )
+        # ------------------------------------------------------------------
+        # Step 5 — SVD-200 on training TF-IDF (classical path)
+        # ------------------------------------------------------------------
+        _svd = TruncatedSVD(
+            n_components=LOADER_CONFIG["svd_components"],
+            random_state=LOADER_CONFIG["random_state"],
+        )
+        X_svd_train = _svd.fit_transform(X_tfidf_train)
+        X_svd_test = _svd.transform(X_tfidf_test)
 
-    # ------------------------------------------------------------------
-    # Step 4 — Fit TF-IDF on training text only
-    # ------------------------------------------------------------------
-    _tfidf = TfidfVectorizer(
-        sublinear_tf=True,
-        min_df=2,
-        max_features=LOADER_CONFIG["max_tfidf_features"],
-    )
-    X_tfidf_train = _tfidf.fit_transform(x_train_text)
-    X_tfidf_test = _tfidf.transform(x_test_text)
+        # ------------------------------------------------------------------
+        # Step 6 — Combine SVD-200 + 6 URL features → StandardScaler
+        # ------------------------------------------------------------------
+        X_combined_train = np.hstack([X_svd_train, url_feats_train])
+        X_combined_test = np.hstack([X_svd_test, url_feats_test])
 
-    # ------------------------------------------------------------------
-    # Step 5 — SVD-200 on training TF-IDF (classical path)
-    # ------------------------------------------------------------------
-    _svd = TruncatedSVD(
-        n_components=LOADER_CONFIG["svd_components"],
-        random_state=LOADER_CONFIG["random_state"],
-    )
-    X_svd_train = _svd.fit_transform(X_tfidf_train)
-    X_svd_test = _svd.transform(X_tfidf_test)
+        _scaler = StandardScaler()
+        X_scaled_train = _scaler.fit_transform(X_combined_train)
+        X_scaled_test = _scaler.transform(X_combined_test)
 
-    # ------------------------------------------------------------------
-    # Step 6 — Combine SVD-200 + 6 URL features → StandardScaler
-    # ------------------------------------------------------------------
-    X_combined_train = np.hstack([X_svd_train, url_feats_train])
-    X_combined_test = np.hstack([X_svd_test, url_feats_test])
-
-    _scaler = StandardScaler()
-    X_scaled_train = _scaler.fit_transform(X_combined_train)
-    X_scaled_test = _scaler.transform(X_combined_test)
-
-    # ------------------------------------------------------------------
-    # Step 7 — Train 6 classical models
-    # NB uses raw TF-IDF directly — SVD can produce negative values which
-    # violate ComplementNB's non-negative input requirement.
-    # ------------------------------------------------------------------
-    classical_specs: dict[str, Any] = {
-        "knn":    KNeighborsClassifier(n_neighbors=LOADER_CONFIG["knn_k"]),
-        "logreg": LogisticRegression(
-                      max_iter=1000,
-                      class_weight="balanced",
-                      random_state=LOADER_CONFIG["random_state"],
-                  ),
-        "nb":     ComplementNB(),
-        "svm":    CalibratedClassifierCV(
-                      LinearSVC(
-                          C=LOADER_CONFIG["svm_c"],
-                          max_iter=2000,
+        # ------------------------------------------------------------------
+        # Step 7 — Train 6 classical models
+        # NB uses raw TF-IDF directly — SVD can produce negative values which
+        # violate ComplementNB's non-negative input requirement.
+        # ------------------------------------------------------------------
+        classical_specs: dict[str, Any] = {
+            "knn":    KNeighborsClassifier(n_neighbors=LOADER_CONFIG["knn_k"]),
+            "logreg": LogisticRegression(
+                          max_iter=1000,
                           class_weight="balanced",
                           random_state=LOADER_CONFIG["random_state"],
-                      )
-                  ),
-        "rf":     RandomForestClassifier(
-                      n_estimators=LOADER_CONFIG["rf_estimators"],
-                      class_weight="balanced",
-                      random_state=LOADER_CONFIG["random_state"],
-                  ),
-        "mlp":    MLPClassifier(
-                      hidden_layer_sizes=LOADER_CONFIG["mlp_hidden"],
-                      max_iter=300,
-                      random_state=LOADER_CONFIG["random_state"],
-                  ),
-    }
+                      ),
+            "nb":     ComplementNB(),
+            "svm":    CalibratedClassifierCV(
+                          LinearSVC(
+                              C=LOADER_CONFIG["svm_c"],
+                              max_iter=2000,
+                              class_weight="balanced",
+                              random_state=LOADER_CONFIG["random_state"],
+                          )
+                      ),
+            "rf":     RandomForestClassifier(
+                          n_estimators=LOADER_CONFIG["rf_estimators"],
+                          class_weight="balanced",
+                          random_state=LOADER_CONFIG["random_state"],
+                      ),
+            "mlp":    MLPClassifier(
+                          hidden_layer_sizes=LOADER_CONFIG["mlp_hidden"],
+                          max_iter=300,
+                          random_state=LOADER_CONFIG["random_state"],
+                      ),
+        }
 
-    _models = {}
-    for name, clf in classical_specs.items():
-        if name == "nb":
-            clf.fit(X_tfidf_train, y_train)
-            preds = clf.predict(X_tfidf_test)
-        else:
-            clf.fit(X_scaled_train, y_train)
-            preds = clf.predict(X_scaled_test)
-        _models[name] = clf
-        print(f"[loader] {name}: {accuracy_score(y_test, preds):.4f}")
+        _models = {}
+        for name, clf in classical_specs.items():
+            if name == "nb":
+                clf.fit(X_tfidf_train, y_train)
+                preds = clf.predict(X_tfidf_test)
+            else:
+                clf.fit(X_scaled_train, y_train)
+                preds = clf.predict(X_scaled_test)
+            _models[name] = clf
+            logger.info("%s accuracy: %.4f", name, accuracy_score(y_test, preds))
 
-    # ------------------------------------------------------------------
-    # Step 8 — Quantum preprocessing pipeline (SVD-50 branch)
-    # ------------------------------------------------------------------
-    _svd_q = TruncatedSVD(
-        n_components=LOADER_CONFIG["svd_q_components"],
-        random_state=LOADER_CONFIG["random_state"],
-    )
-    X_svd_q_train = _svd_q.fit_transform(X_tfidf_train)
-
-    X_q_combined_train = np.hstack([X_svd_q_train, url_feats_train])
-
-    _scaler_q = StandardScaler()
-    X_q_scaled_train = _scaler_q.fit_transform(X_q_combined_train)
-
-    _pca = PCA(
-        n_components=LOADER_CONFIG["n_pca_components"],
-        random_state=LOADER_CONFIG["random_state"],
-    )
-    X_pca_train = _pca.fit_transform(X_q_scaled_train)
-
-    _angle_scaler = MinMaxScaler(feature_range=(0, float(np.pi)))
-    X_angles_train = _angle_scaler.fit_transform(X_pca_train)
-
-    # ------------------------------------------------------------------
-    # Step 9 — Build QKNN training subset (500 stratified samples)
-    # ------------------------------------------------------------------
-    y_train_encoded = np.where(y_train == "bad", 1.0, 0.0)
-
-    idx_q, _ = train_test_split(
-        np.arange(len(X_angles_train)),
-        train_size=LOADER_CONFIG["qsvm_train_size"],
-        random_state=LOADER_CONFIG["random_state"],
-        stratify=y_train,
-    )
-    _x_qknn_train = X_angles_train[idx_q]
-    _y_qknn_train = y_train_encoded[idx_q]
-
-    # ------------------------------------------------------------------
-    # Step 10 — Load pre-computed QSVM kernel matrix and fit SVC.
-    # The kernel matrix was computed offline from a fixed 500-sample subset.
-    # We load matching labels from y_qsvm_train.npy (generated by
-    # generate_qsvm_labels.py). If the file is absent, fall back to the
-    # live labels with a clear warning — predictions will be approximate.
-    # ------------------------------------------------------------------
-    K_train = np.load(LOADER_CONFIG["qsvm_kernel_path"])
-
-    labels_path = LOADER_CONFIG["qsvm_labels_path"]
-    if os.path.exists(labels_path):
-        _y_qsvm_train = np.load(labels_path)
-        print(f"[loader] QSVM: loaded {len(_y_qsvm_train)} offline labels from disk.")
-    else:
-        _y_qsvm_train = _y_qknn_train
-        print(
-            "[loader] WARNING: y_qsvm_train.npy not found — QSVM will use live labels "
-            "which may not match the offline kernel matrix. Run generate_qsvm_labels.py once."
+        # ------------------------------------------------------------------
+        # Step 8 — Quantum preprocessing pipeline (SVD-50 branch)
+        # ------------------------------------------------------------------
+        _svd_q = TruncatedSVD(
+            n_components=LOADER_CONFIG["svd_q_components"],
+            random_state=LOADER_CONFIG["random_state"],
         )
+        X_svd_q_train = _svd_q.fit_transform(X_tfidf_train)
 
-    _x_qsvm_train = _x_qknn_train
+        X_q_combined_train = np.hstack([X_svd_q_train, url_feats_train])
 
-    _svm_qsvm = SVC(
-        kernel="precomputed",
-        C=LOADER_CONFIG["svm_c"],
-        random_state=LOADER_CONFIG["random_state"],
-    )
-    _svm_qsvm.fit(K_train, _y_qsvm_train)
-    print(f"[loader] QSVM: {_svm_qsvm.n_support_} support vectors")
+        _scaler_q = StandardScaler()
+        X_q_scaled_train = _scaler_q.fit_transform(X_q_combined_train)
 
-    # ------------------------------------------------------------------
-    # Step 11 — Load VQC weights
-    # ------------------------------------------------------------------
-    if _TORCH_AVAILABLE:
-        vqc_path = LOADER_CONFIG["vqc_weights_path"]
-        if os.path.exists(vqc_path):
-            vqc_weights = np.load(vqc_path)
-            _vqc_params = torch.tensor(vqc_weights, dtype=torch.float32)
-            print("[loader] VQC weights loaded.")
+        _pca = PCA(
+            n_components=LOADER_CONFIG["n_pca_components"],
+            random_state=LOADER_CONFIG["random_state"],
+        )
+        X_pca_train = _pca.fit_transform(X_q_scaled_train)
+
+        _angle_scaler = MinMaxScaler(feature_range=(0, float(np.pi)))
+        X_angles_train = _angle_scaler.fit_transform(X_pca_train)
+
+        # ------------------------------------------------------------------
+        # Step 9 — Build QKNN training subset (500 stratified samples)
+        # ------------------------------------------------------------------
+        y_train_encoded = np.where(y_train == "bad", 1.0, 0.0)
+
+        idx_q, _ = train_test_split(
+            np.arange(len(X_angles_train)),
+            train_size=LOADER_CONFIG["qsvm_train_size"],
+            random_state=LOADER_CONFIG["random_state"],
+            stratify=y_train,
+        )
+        _x_qknn_train = X_angles_train[idx_q]
+        _y_qknn_train = y_train_encoded[idx_q]
+
+        # ------------------------------------------------------------------
+        # Step 10 — Load pre-computed QSVM kernel matrix and fit SVC.
+        # ------------------------------------------------------------------
+        K_train = np.load(LOADER_CONFIG["qsvm_kernel_path"])
+
+        labels_path = LOADER_CONFIG["qsvm_labels_path"]
+        if os.path.exists(labels_path):
+            _y_qsvm_train = np.load(labels_path)
+            logger.info("QSVM: loaded %d offline labels from disk.", len(_y_qsvm_train))
         else:
-            print(f"[loader] WARNING: VQC weights not found at {vqc_path} — VQC disabled.")
-    else:
-        print("[loader] VQC skipped (torch unavailable).")
+            _y_qsvm_train = _y_qknn_train
+            logger.warning(
+                "y_qsvm_train.npy not found — QSVM will use live labels "
+                "which may not match the offline kernel matrix. "
+                "Run generate_qsvm_labels.py once to fix this."
+            )
 
-    print("[loader] All models ready.")
-    _initialized = True
+        _x_qsvm_train = _x_qknn_train
+
+        _svm_qsvm = SVC(
+            kernel="precomputed",
+            C=LOADER_CONFIG["svm_c"],
+            random_state=LOADER_CONFIG["random_state"],
+        )
+        _svm_qsvm.fit(K_train, _y_qsvm_train)
+        logger.info("QSVM: %s support vectors", _svm_qsvm.n_support_)
+
+        # ------------------------------------------------------------------
+        # Step 11 — Load VQC weights
+        # ------------------------------------------------------------------
+        if _TORCH_AVAILABLE:
+            vqc_path = LOADER_CONFIG["vqc_weights_path"]
+            if os.path.exists(vqc_path):
+                vqc_weights = np.load(vqc_path)
+                _vqc_params = torch.tensor(vqc_weights, dtype=torch.float32)
+                logger.info("VQC weights loaded.")
+            else:
+                logger.warning("VQC weights not found at %s — VQC disabled.", vqc_path)
+        else:
+            logger.info("VQC skipped (torch unavailable).")
+
+        logger.info("All models ready.")
+        _initialized = True
 
 
 # ---------------------------------------------------------------------------
@@ -405,7 +425,7 @@ def predict_all(url: str, include_quantum: bool = True) -> dict[str, Any]:
             t0 = time.monotonic()
             xi = torch.tensor(angles, dtype=torch.float32)
             with torch.no_grad():
-                out = torch.stack(list(_vqc_circuit(xi, _vqc_params)))
+                out = torch.stack(list(_vqc_predict(xi, _vqc_params)))
             logit = out.mean().item()
             vqc_elapsed = int((time.monotonic() - t0) * 1000)
             # Convention: PauliZ mean < 0 → "bad" (verified against training notebook).
