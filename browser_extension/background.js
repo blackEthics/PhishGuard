@@ -1,24 +1,17 @@
-/**
- * background.js — PhishGuard service worker
- *
- * Responsibilities:
- *  1. Handle scan requests from content.js and popup.js via chrome.runtime.onMessage
- *  2. Intercept navigations: if Flask returns high-risk before page commits, redirect
- *     to warning.html; if page already loaded, tell content.js to inject overlay.
- */
-
 "use strict";
 
-const API_BASE = "http://localhost:5000";
-
-// Ratio of models that must flag a URL for navigation blocking (0.8 = 80%)
+const API_BASE       = "http://localhost:5000";
 const HIGH_RISK_RATIO = 0.8;
+const FETCH_TIMEOUT_MS = 10_000;
 
-// Track pending navigations: tabId → { url, loaded }
+// tabId → { url, loaded }
 const pendingNav = new Map();
 
+// URL → Promise<data> — deduplicates concurrent scans for the same URL
+const inFlight = new Map();
+
 // ---------------------------------------------------------------------------
-// Message handler: content.js and popup.js send {action:"scan", url:"..."}
+// Message handler: content.js and popup.js send { action:"scan", url:"..." }
 // ---------------------------------------------------------------------------
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.action !== "scan") return false;
@@ -37,8 +30,8 @@ chrome.webNavigation.onBeforeNavigate.addListener((details) => {
   if (details.frameId !== 0) return;
   const { tabId, url } = details;
 
-  if (!url.startsWith("http")) return;
-  if (url.startsWith("http://localhost:5000")) return;
+  if (!url.startsWith("http://") && !url.startsWith("https://")) return;
+  if (isLoopbackUrl(url)) return;
 
   pendingNav.set(tabId, { url, loaded: false });
 
@@ -52,12 +45,12 @@ chrome.webNavigation.onBeforeNavigate.addListener((details) => {
       if (verdict === "bad" && phishing_votes / total_models >= HIGH_RISK_RATIO) {
         const warnUrl =
           chrome.runtime.getURL("warning.html") +
-          `?url=${encodeURIComponent(url)}` +
-          `&votes=${phishing_votes}` +
-          `&total=${total_models}`;
+          "?url="   + encodeURIComponent(url) +
+          "&votes=" + encodeURIComponent(String(phishing_votes)) +
+          "&total=" + encodeURIComponent(String(total_models));
 
         if (entry.loaded) {
-          // Page finished loading before the scan did — inject overlay instead
+          // Page loaded before scan returned — inject overlay
           chrome.tabs.sendMessage(tabId, {
             action: "showWarning",
             url,
@@ -65,7 +58,7 @@ chrome.webNavigation.onBeforeNavigate.addListener((details) => {
             total: total_models,
           }).catch(() => {});
         } else {
-          // Redirect the tab to the warning page before the real page renders
+          // Redirect before the phishing page renders
           chrome.tabs.update(tabId, { url: warnUrl }).catch(() => {});
         }
       }
@@ -87,15 +80,52 @@ chrome.webNavigation.onErrorOccurred.addListener((details) => {
   pendingNav.delete(details.tabId);
 });
 
+// B3 fix: clean up Map when a tab is closed to prevent unbounded growth
+chrome.tabs.onRemoved.addListener((tabId) => {
+  pendingNav.delete(tabId);
+});
+
 // ---------------------------------------------------------------------------
-// Helper: POST to /api/scan with classical models only (faster)
+// Helpers
 // ---------------------------------------------------------------------------
+
+// B12 fix: catch all loopback variants, not just "localhost:5000"
+function isLoopbackUrl(url) {
+  try {
+    const { hostname } = new URL(url);
+    return (
+      hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      hostname === "[::1]"
+    );
+  } catch {
+    return false;
+  }
+}
+
+// B4 fix: AbortController timeout so a hung Flask server doesn't stall the SW.
+// B14 fix: inFlight Map deduplicates concurrent scans for the same URL.
 async function fetchScan(url) {
-  const res = await fetch(`${API_BASE}/api/scan`, {
+  if (inFlight.has(url)) return inFlight.get(url);
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
+  const promise = fetch(`${API_BASE}/api/scan`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ url, include_quantum: false }),
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
+    signal: controller.signal,
+  })
+    .then(res => {
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    })
+    .finally(() => {
+      clearTimeout(timer);
+      inFlight.delete(url);
+    });
+
+  inFlight.set(url, promise);
+  return promise;
 }

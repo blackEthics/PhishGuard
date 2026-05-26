@@ -1,15 +1,8 @@
-/**
- * popup.js — PhishGuard toolbar popup
- *
- * Auto-scans the active tab's URL on open.
- * Shows SAFE / PHISHING verdict, vote bar, and per-model badges.
- * Rescan button lets the user re-run the scan manually.
- */
-
 (function () {
   "use strict";
 
-  // Short names shown in model badges
+  const SCAN_TIMEOUT_MS = 15_000;
+
   const MODEL_NAMES = {
     knn:    "KNN",
     logreg: "LogReg",
@@ -42,14 +35,36 @@
     states[name].classList.remove("hidden");
   }
 
+  function showError(msg, hint) {
+    showState("error");
+    document.getElementById("err-msg").textContent = msg;
+    if (hint) document.getElementById("err-hint").textContent = hint;
+  }
+
   function scan(url) {
     showState("scanning");
 
+    // B8 fix: timeout so the popup never gets stuck on the spinner forever
+    let done = false;
+    const timeout = setTimeout(() => {
+      if (done) return;
+      done = true;
+      showError(
+        "Scan timed out.",
+        "The PhishGuard server is not responding. Make sure it is running: python app.py"
+      );
+    }, SCAN_TIMEOUT_MS);
+
     chrome.runtime.sendMessage({ action: "scan", url }, (response) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timeout);
+
       if (chrome.runtime.lastError || !response || !response.success) {
-        showState("error");
-        const msg = response?.error || "Cannot connect to localhost:5000.";
-        document.getElementById("err-msg").textContent = msg;
+        const msg = response?.error
+          || chrome.runtime.lastError?.message
+          || "Cannot connect to localhost:5000.";
+        showError(msg);
         return;
       }
       renderResult(response.data);
@@ -70,14 +85,13 @@
     if (srLive) {
       srLive.textContent = isPhishing
         ? `Phishing detected: ${phishing_votes} of ${total_models} models flagged this URL.`
-        : `Safe URL: ${phishing_votes} of ${total_models} models flagged this URL.`;
+        : `Safe: ${phishing_votes} of ${total_models} models flagged this URL.`;
     }
 
     voteFill.style.width = pct + "%";
     voteFill.className   = `vote-fill ${isPhishing ? "phish-fill" : "safe-fill"}`;
     voteText.textContent = `${phishing_votes} of ${total_models} models flagged this URL`;
 
-    // Per-model badges
     modelRow.innerHTML = "";
     Object.entries(MODEL_NAMES).forEach(([key, label]) => {
       const m = data[key];
@@ -92,7 +106,7 @@
 
   function init() {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (!tabs.length) { showState("error"); return; }
+      if (!tabs.length) { showError("No active tab found."); return; }
 
       const tab = tabs[0];
       activeTabUrl = tab.url || "";
@@ -100,13 +114,13 @@
         ? activeTabUrl.slice(0, 45) + "…"
         : activeTabUrl;
       currentUrlEl.textContent = display || "—";
-      webappLink.href = `http://localhost:5000/?url=${encodeURIComponent(activeTabUrl)}`;
+      webappLink.href = "http://localhost:5000/?url=" + encodeURIComponent(activeTabUrl);
 
       if (!activeTabUrl.startsWith("http")) {
-        showState("error");
-        document.getElementById("err-msg").textContent = "Not a web page.";
-        document.getElementById("err-hint").textContent =
-          "Navigate to an http:// or https:// URL first.";
+        showError(
+          "Not a web page.",
+          "Navigate to an http:// or https:// URL first."
+        );
         return;
       }
 

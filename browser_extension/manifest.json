@@ -1,12 +1,11 @@
 {
   "manifest_version": 3,
   "name": "PhishGuard",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Real-time phishing URL detection powered by quantum-classical ML. Requires PhishGuard Flask server on localhost:5000.",
   "permissions": [
     "activeTab",
     "tabs",
-    "storage",
     "webNavigation"
   ],
   "host_permissions": [
@@ -36,10 +35,13 @@
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
-  "web_accessible_resources": [
-    {
-      "resources": ["warning.html", "warning.css"],
-      "matches": ["<all_urls>"]
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none';"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "phishguard@phishguard.local",
+      "strict_min_version": "109.0"
     }
-  ]
+  }
 }
