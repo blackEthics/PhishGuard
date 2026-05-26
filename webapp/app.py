@@ -1,19 +1,33 @@
 """PhishGuard — Flask application entry point."""
+from __future__ import annotations
 
 import logging
 import os
+import secrets
 import sys
+from datetime import timedelta
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, abort, jsonify, render_template, request, session
+from flask_login import LoginManager
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # python-dotenv is optional; env vars may be set by the shell
 
 from api.scan import scan_bp
 from api.batch import batch_bp
 from api.circuit import circuit_bp
+from auth.routes import auth_bp
+from auth.oauth_client import oauth
+from auth.models import User
 import models.loader as loader
 import database.db as db
+import database.users as users_db
 
 # ---------------------------------------------------------------------------
-# Logging — configured once here, before any module emits a log record.
+# Logging
 # ---------------------------------------------------------------------------
 logging.basicConfig(
     level=logging.INFO,
@@ -29,7 +43,50 @@ app = Flask(__name__)
 # Configuration
 # ---------------------------------------------------------------------------
 app.config["MAX_CONTENT_LENGTH"] = 5 * 1024 * 1024  # 5 MB upload cap
-app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-key-change-before-any-deployment")
+app.config["SECRET_KEY"] = os.environ.get(
+    "SECRET_KEY", "dev-key-change-before-any-deployment"
+)
+
+# Session & cookie security
+_is_production = os.environ.get("FLASK_ENV") == "production"
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SECURE"] = _is_production  # True only over HTTPS
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=30)
+app.config["REMEMBER_COOKIE_HTTPONLY"] = True
+app.config["REMEMBER_COOKIE_SECURE"] = _is_production
+app.config["REMEMBER_COOKIE_DURATION"] = timedelta(days=30)
+app.config["REMEMBER_COOKIE_SAMESITE"] = "Lax"
+
+# Google OAuth credentials (populated from .env / environment)
+app.config["GOOGLE_CLIENT_ID"] = os.environ.get("GOOGLE_CLIENT_ID", "")
+app.config["GOOGLE_CLIENT_SECRET"] = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+
+# ---------------------------------------------------------------------------
+# Flask-Login
+# ---------------------------------------------------------------------------
+login_manager = LoginManager(app)
+login_manager.login_view = "auth.login"           # type: ignore[assignment]
+login_manager.login_message = "Please sign in to access this page."
+login_manager.login_message_category = "warning"
+
+
+@login_manager.user_loader
+def load_user(user_id: str) -> "User | None":
+    return User.get(int(user_id))
+
+
+# ---------------------------------------------------------------------------
+# Authlib — Google OAuth2 client
+# ---------------------------------------------------------------------------
+oauth.init_app(app)
+oauth.register(
+    name="google",
+    client_id=app.config["GOOGLE_CLIENT_ID"],
+    client_secret=app.config["GOOGLE_CLIENT_SECRET"],
+    server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+    client_kwargs={"scope": "openid email profile"},
+)
 
 # ---------------------------------------------------------------------------
 # Blueprints
@@ -37,9 +94,37 @@ app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-key-change-before-a
 app.register_blueprint(scan_bp)
 app.register_blueprint(batch_bp)
 app.register_blueprint(circuit_bp)
+app.register_blueprint(auth_bp)
 
 # ---------------------------------------------------------------------------
-# CORS — allow only the browser extension and localhost dev origins.
+# CSRF — session-token approach for all HTML form POSTs
+# API endpoints (/api/*) use JSON bodies and are exempt.
+# ---------------------------------------------------------------------------
+def _csrf_token() -> str:
+    """Return (and lazily create) the per-session CSRF token."""
+    if "_csrf_token" not in session:
+        session["_csrf_token"] = secrets.token_hex(32)
+    return session["_csrf_token"]
+
+
+app.jinja_env.globals["csrf_token"] = _csrf_token
+
+
+@app.before_request
+def enforce_csrf() -> None:
+    if request.method != "POST":
+        return
+    if request.path.startswith("/api/"):
+        return  # JSON API; no form CSRF needed
+    token = session.get("_csrf_token", "")
+    form_token = request.form.get("csrf_token", "")
+    # Require both tokens to be non-empty AND equal — empty == empty must fail.
+    if not token or not form_token or not secrets.compare_digest(token, form_token):
+        abort(403)
+
+
+# ---------------------------------------------------------------------------
+# CORS — allow only browser extensions and localhost dev origins.
 # Wildcard "*" is intentionally avoided on data-modifying endpoints.
 # ---------------------------------------------------------------------------
 _ALLOWED_ORIGINS = {"http://localhost:5000", "http://127.0.0.1:5000"}
@@ -59,8 +144,6 @@ def add_headers(response):
     response.headers["Access-Control-Allow-Headers"] = "Content-Type"
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
 
-    # Ensure browser CORS preflight (OPTIONS) always gets 200 so the real
-    # request is not blocked by a 405 Method Not Allowed.
     if request.method == "OPTIONS":
         response.status_code = 200
 
@@ -71,19 +154,24 @@ def add_headers(response):
         "default-src 'self'; "
         "script-src 'self' https://cdn.jsdelivr.net; "
         "style-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; "
-        "img-src 'self' data:; "
+        # Google profile pictures are served from lh3.googleusercontent.com
+        "img-src 'self' data: https://lh3.googleusercontent.com https://*.googleusercontent.com; "
         "connect-src 'self';"
     )
     return response
 
 
 # ---------------------------------------------------------------------------
-# Error handlers — return JSON for all API-facing errors so that
-# the browser extension never receives an unexpected HTML error page.
+# Error handlers
 # ---------------------------------------------------------------------------
 @app.errorhandler(400)
 def bad_request(e):
     return jsonify({"error": "Bad request"}), 400
+
+
+@app.errorhandler(403)
+def forbidden(e):
+    return render_template("errors/403.html"), 403
 
 
 @app.errorhandler(404)
@@ -126,13 +214,12 @@ def visualizer():
 
 
 # ---------------------------------------------------------------------------
-# Entry point — initialization runs only when actually serving, not on import.
-# debug=False and host=127.0.0.1 prevent Werkzeug debugger exposure on LAN.
+# Entry point
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
     with app.app_context():
-        # Database must be initialised first so it is ready when models load.
         db.init_db()
+        users_db.init_user_tables()
         logger.info("Database initialised at %s", db.DB_PATH)
         try:
             loader.initialize()

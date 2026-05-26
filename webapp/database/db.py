@@ -57,13 +57,20 @@ def init_db() -> None:
         con.close()
 
 
-def save_scan(url: str, verdict: str, confidence: float, results: dict) -> None:
+def save_scan(
+    url: str,
+    verdict: str,
+    confidence: float,
+    results: dict,
+    user_id: "int | None" = None,
+) -> None:
     """Insert one scan record into the database."""
     con = _get_conn()
     try:
         con.execute(
-            "INSERT INTO scans (url, verdict, confidence, tld, results) VALUES (?, ?, ?, ?, ?)",
-            (url, verdict, confidence, _extract_tld(url), json.dumps(results)),
+            "INSERT INTO scans (url, verdict, confidence, tld, results, user_id)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (url, verdict, confidence, _extract_tld(url), json.dumps(results), user_id),
         )
         con.commit()
     finally:

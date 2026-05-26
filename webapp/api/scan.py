@@ -4,6 +4,7 @@ import logging
 import time
 
 from flask import Blueprint, jsonify, request
+from flask_login import current_user
 
 import models.loader as loader
 import database.db as db
@@ -47,8 +48,9 @@ def api_scan():
     verdict = results["ensemble"]["verdict"]
     confidence = results["ensemble"]["confidence"]
 
+    user_id = current_user.id if current_user.is_authenticated else None
     try:
-        db.save_scan(url, verdict, confidence, results)
+        db.save_scan(url, verdict, confidence, results, user_id=user_id)
     except Exception:
         # A DB write failure must not turn a successful scan into a 500 error.
         logger.exception("Failed to persist scan for %s", url)

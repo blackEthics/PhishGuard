@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}Account Settings — PhishGuard{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-12 col-md-9 col-lg-7">
+
+    <div class="d-flex align-items-center mb-4">
+      <h2 class="mb-0 me-auto">&#x2699;&#xFE0F; Account Settings</h2>
+      <a href="{{ url_for('auth.profile') }}" class="btn btn-outline-secondary btn-sm">
+        &#8592; Profile
+      </a>
+    </div>
+
+    <!-- Account information (read-only) -->
+    <div class="card shadow-sm border-0 mb-4">
+      <div class="card-header bg-transparent fw-semibold">Account Information</div>
+      <div class="card-body">
+        <div class="row g-3">
+          <div class="col-sm-6">
+            <label class="form-label text-muted small">Display name</label>
+            <input type="text" class="form-control" value="{{ current_user.name | e }}" readonly>
+          </div>
+          <div class="col-sm-6">
+            <label class="form-label text-muted small">Email address</label>
+            <input type="email" class="form-control" value="{{ current_user.email | e }}" readonly>
+          </div>
+        </div>
+        <p class="text-muted small mt-3 mb-0">
+          Name and email are managed by your Google account and cannot be changed here.
+        </p>
+      </div>
+    </div>
+
+    <!-- Linked account -->
+    <div class="card shadow-sm border-0 mb-4">
+      <div class="card-header bg-transparent fw-semibold">Linked Account</div>
+      <div class="card-body d-flex align-items-center gap-3">
+        <!-- Google G -->
+        <svg width="28" height="28" viewBox="0 0 48 48" aria-hidden="true">
+          <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0
+            14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+          <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94
+            c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+          <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59
+            l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+          <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6
+            c-2.18 1.48-4.97 2.36-8.16 2.36-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19
+            C6.51 42.62 14.62 48 24 48z"/>
+        </svg>
+        <div>
+          <div class="fw-medium">Google</div>
+          <div class="text-muted small">{{ current_user.email | e }}</div>
+        </div>
+        <span class="badge bg-success ms-auto">Connected</span>
+      </div>
+    </div>
+
+    <!-- Session / privacy info -->
+    <div class="card shadow-sm border-0 mb-4">
+      <div class="card-header bg-transparent fw-semibold">Privacy &amp; Sessions</div>
+      <div class="card-body">
+        <ul class="list-unstyled mb-0 small text-muted">
+          <li class="mb-2">&#x1F512; PhishGuard only stores your name, email, profile picture, and scan results.</li>
+          <li class="mb-2">&#x1F4C5; Sessions expire after 30 days of inactivity.</li>
+          <li class="mb-0">&#x1F6AA; You can sign out of all sessions by deleting your account and re-registering.</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Danger zone -->
+    <div class="card shadow-sm border-danger border-2 mb-4">
+      <div class="card-header bg-danger bg-opacity-10 text-danger fw-semibold">
+        &#x26A0;&#xFE0F; Danger Zone
+      </div>
+      <div class="card-body">
+        <p class="mb-3 text-muted small">
+          Deleting your account is permanent. Your scan history attributed to your account
+          will be anonymised. This action cannot be undone.
+        </p>
+        <!-- Trigger modal -->
+        <button type="button" class="btn btn-outline-danger btn-sm"
+                data-bs-toggle="modal" data-bs-target="#deleteModal">
+          Delete my account
+        </button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Delete confirmation modal -->
+<div class="modal fade" id="deleteModal" tabindex="-1" aria-labelledby="deleteModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header border-danger">
+        <h5 class="modal-title text-danger" id="deleteModalLabel">
+          &#x26A0;&#xFE0F; Confirm Account Deletion
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p>You are about to permanently delete your PhishGuard account:</p>
+        <p class="fw-semibold">{{ current_user.email | e }}</p>
+        <p class="text-muted small mb-0">This will remove your profile and deactivate your account. Scan records will remain anonymised in the analytics database.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <form action="{{ url_for('auth.delete_account') }}" method="post" class="d-inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn btn-danger">Yes, delete my account</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

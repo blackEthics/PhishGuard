@@ -117,3 +117,33 @@ footer {
 @media (max-width: 400px) {
   .url-dissector { font-size: 0.85rem; }
 }
+
+/* ── Auth / User menu ───────────────────────────────── */
+#userMenuBtn img {
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+/* Sign-in button visual polish */
+.navbar .btn-outline-light {
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+/* Login page — keep card from being too wide on landscape mobile */
+@media (max-width: 576px) {
+  .card .card-body.p-md-5 { padding: 1.5rem !important; }
+}
+
+/* Profile avatar fallback div */
+.avatar-initial {
+  width: 96px;
+  height: 96px;
+  font-size: 2rem;
+  font-weight: 700;
+}
+
+/* Danger zone card */
+.border-danger.border-2 {
+  border-width: 2px !important;
+}

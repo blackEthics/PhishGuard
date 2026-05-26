@@ -48,4 +48,5 @@ Thumbs.db
 webapp/api/__pycache__/
 webapp/models/__pycache__/
 webapp/database/__pycache__/
+webapp/auth/__pycache__/
 webapp/__pycache__/

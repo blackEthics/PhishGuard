@@ -15,6 +15,7 @@
   <!-- Skip-to-content for keyboard users -->
   <a class="skip-link" href="#main-content">Skip to main content</a>
 
+  <!-- ── Navbar ── -->
   <nav class="navbar navbar-expand-lg navbar-dark bg-dark" aria-label="Main navigation">
     <div class="container">
       <a class="navbar-brand" href="/">&#x1F6E1;&#xFE0F; PhishGuard</a>
@@ -24,8 +25,11 @@
               aria-label="Toggle navigation">
         <span class="navbar-toggler-icon"></span>
       </button>
+
       <div class="collapse navbar-collapse" id="navbarNav">
-        <ul class="navbar-nav ms-auto">
+
+        <!-- Main nav links (left side) -->
+        <ul class="navbar-nav me-auto">
           <li class="nav-item">
             <a class="nav-link {% if request.path == '/' %}active{% endif %}"
                {% if request.path == '/' %}aria-current="page"{% endif %}
@@ -47,16 +51,119 @@
                href="/visualizer">Quantum Visualizer</a>
           </li>
         </ul>
+
+        <!-- Auth section (right side) -->
+        <ul class="navbar-nav ms-auto align-items-lg-center">
+
+          {% if current_user.is_authenticated %}
+          <!-- ── Logged-in dropdown ── -->
+          <li class="nav-item dropdown">
+            <a class="nav-link dropdown-toggle d-flex align-items-center gap-2 py-1"
+               href="#" role="button"
+               data-bs-toggle="dropdown"
+               aria-expanded="false"
+               id="userMenuBtn">
+
+              {% if current_user.picture %}
+                <img src="{{ current_user.picture }}"
+                     alt="{{ current_user.name | e }}"
+                     class="rounded-circle user-avatar-nav border border-secondary"
+                     width="30" height="30"
+                     referrerpolicy="no-referrer"
+                     onerror="this.style.display='none'">
+              {% else %}
+                <span class="user-avatar-initial-sm bg-primary text-white rounded-circle
+                             d-inline-flex align-items-center justify-content-center fw-bold"
+                      style="width:30px;height:30px;font-size:0.8rem;">
+                  {{ current_user.name[0].upper() }}
+                </span>
+              {% endif %}
+
+              <span class="d-none d-md-inline">
+                {{ current_user.name.split()[0] | e }}
+              </span>
+            </a>
+
+            <ul class="dropdown-menu dropdown-menu-end shadow-sm border-0"
+                aria-labelledby="userMenuBtn"
+                style="min-width: 210px;">
+              <!-- Email header -->
+              <li class="px-3 py-2">
+                <div class="small text-muted">Signed in as</div>
+                <div class="small fw-semibold text-truncate" style="max-width:180px;">
+                  {{ current_user.email | e }}
+                </div>
+              </li>
+              <li><hr class="dropdown-divider my-1"></li>
+              <li>
+                <a class="dropdown-item" href="{{ url_for('auth.profile') }}">
+                  &#x1F464;&nbsp; Profile
+                </a>
+              </li>
+              <li>
+                <a class="dropdown-item" href="{{ url_for('auth.history') }}">
+                  &#x1F4CB;&nbsp; My Scan History
+                </a>
+              </li>
+              <li>
+                <a class="dropdown-item" href="{{ url_for('auth.settings') }}">
+                  &#x2699;&#xFE0F;&nbsp; Settings
+                </a>
+              </li>
+              <li><hr class="dropdown-divider my-1"></li>
+              <li>
+                <!-- Logout form with CSRF token -->
+                <form action="{{ url_for('auth.logout') }}" method="post" class="m-0">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <button type="submit" class="dropdown-item text-danger">
+                    &#x1F6AA;&nbsp; Sign Out
+                  </button>
+                </form>
+              </li>
+            </ul>
+          </li>
+
+          {% else %}
+          <!-- ── Sign-in button ── -->
+          <li class="nav-item ms-lg-2 mt-2 mt-lg-0">
+            <a class="nav-link btn btn-outline-light btn-sm px-3"
+               href="{{ url_for('auth.login') }}{% if request.path not in ['/', '/auth/login'] %}?next={{ request.path | urlencode }}{% endif %}">
+              Sign In
+            </a>
+          </li>
+          {% endif %}
+
+        </ul>
       </div>
     </div>
   </nav>
 
+  <!-- ── Flash messages (auto-dismiss after 5 s) ── -->
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      <div class="container mt-3" id="flash-container">
+        {% for category, message in messages %}
+          <div class="alert alert-{{ category }} alert-dismissible fade show mb-2"
+               role="alert"
+               data-auto-dismiss="5000">
+            {{ message | e }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"
+                    aria-label="Close"></button>
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% endwith %}
+
+  <!-- ── Page content ── -->
   <main id="main-content" class="container mt-4">
     {% block content %}{% endblock %}
   </main>
 
+  <!-- ── Footer ── -->
   <footer role="contentinfo">
-    <p>PhishGuard &copy; 2025 &mdash; Bachelor Final Year Project &mdash; Romanian-American University</p>
+    <p>PhishGuard &copy; 2025 &mdash; Bachelor Final Year Project &mdash;
+       Romanian-American University</p>
   </footer>
 
   <!-- Chart.js before page scripts so `Chart` is defined when IIFEs run -->
@@ -66,8 +173,22 @@
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
           integrity="sha384-YvpcrYf0tY3lHB60NNkmXc4s9bIOgUxi8T/jzmPVKKxI7bBbNxHh9FJRFGbCZ1t"
           crossorigin="anonymous"></script>
-  <!-- Shared utilities loaded first so each page script can use PhishGuard.escHtml etc. -->
+  <!-- Shared utilities -->
   <script src="{{ url_for('static', filename='js/utils.js') }}"></script>
+
+  <!-- Auto-dismiss flash messages -->
+  <script>
+  (function () {
+    document.querySelectorAll('[data-auto-dismiss]').forEach(function (el) {
+      var ms = parseInt(el.dataset.autoDismiss, 10) || 5000;
+      setTimeout(function () {
+        var bsAlert = bootstrap.Alert.getOrCreateInstance(el);
+        if (bsAlert) bsAlert.close();
+      }, ms);
+    });
+  })();
+  </script>
+
   {% block scripts %}{% endblock %}
 </body>
 </html>

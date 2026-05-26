@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}Sign In — PhishGuard{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center" style="margin-top: 3.5rem;">
+  <div class="col-12 col-sm-10 col-md-7 col-lg-5 col-xl-4">
+
+    <!-- ── Setup warning (only shown when .env is missing) ── -->
+    {% if not creds_ok %}
+    <div class="alert alert-warning d-flex gap-2 align-items-start mb-3" role="alert">
+      <span style="font-size:1.2rem; line-height:1.4;">&#x26A0;&#xFE0F;</span>
+      <div class="small">
+        <strong>Setup required —</strong>
+        Google OAuth credentials are not configured.<br>
+        Create <code>webapp/.env</code> with your
+        <code>GOOGLE_CLIENT_ID</code> and <code>GOOGLE_CLIENT_SECRET</code>.
+        <br>
+        <a href="https://console.cloud.google.com/apis/credentials"
+           target="_blank" rel="noopener noreferrer" class="fw-medium">
+          Get credentials from Google Cloud Console &#x2197;
+        </a>
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- ── Main card ── -->
+    <div class="card shadow border-0">
+      <div class="card-body p-4 p-sm-5 text-center">
+
+        <!-- Brand mark -->
+        <div class="mb-4">
+          <div style="font-size: 3rem; line-height: 1;">&#x1F6E1;&#xFE0F;</div>
+          <h1 class="h4 fw-bold mt-2 mb-1">PhishGuard</h1>
+          <p class="text-muted mb-0" style="font-size: 0.875rem;">
+            Sign in to save your scan history and profile.
+          </p>
+        </div>
+
+        <!-- Google button -->
+        <a id="google-signin-btn"
+           href="{{ url_for('auth.google_login') }}{% if next_url %}?next={{ next_url | urlencode }}{% endif %}"
+           class="btn btn-outline-secondary w-100 d-flex align-items-center justify-content-center gap-2 py-2 mb-3
+                  {% if not creds_ok %}disabled{% endif %}"
+           {% if not creds_ok %}
+             tabindex="-1" aria-disabled="true"
+             title="Configure Google OAuth credentials first"
+           {% endif %}
+           style="font-size: 0.95rem; height: 2.75rem;">
+
+          <!-- Google "G" logo -->
+          <svg width="20" height="20" viewBox="0 0 48 48" aria-hidden="true" focusable="false">
+            <path fill="#EA4335"
+              d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0
+                 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+            <path fill="#4285F4"
+              d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94
+                 c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+            <path fill="#FBBC05"
+              d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59
+                 l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+            <path fill="#34A853"
+              d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6
+                 c-2.18 1.48-4.97 2.36-8.16 2.36-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19
+                 C6.51 42.62 14.62 48 24 48z"/>
+          </svg>
+
+          <!-- Label (swapped to spinner on click) -->
+          <span id="signin-label" class="fw-medium">Continue with Google</span>
+          <span id="signin-spinner"
+                class="spinner-border spinner-border-sm d-none"
+                role="status" aria-label="Signing in…"></span>
+        </a>
+
+        <p class="text-muted mb-0" style="font-size: 0.75rem; line-height: 1.55;">
+          PhishGuard only accesses your name, email, and profile picture from
+          Google. No passwords are stored.
+        </p>
+      </div>
+    </div>
+
+    <!-- Flash messages below card -->
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, message in messages %}
+        <div class="alert alert-{{ category }} mt-3 mb-0" role="alert">
+          {{ message | e }}
+        </div>
+      {% endfor %}
+    {% endwith %}
+
+    <p class="text-center text-muted mt-3 mb-0 small">
+      <a href="{{ url_for('index') }}" class="text-muted">
+        &#8592; Back to URL Analyser
+      </a>
+    </p>
+
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  var btn = document.getElementById('google-signin-btn');
+  if (!btn || btn.classList.contains('disabled')) return;
+
+  btn.addEventListener('click', function (e) {
+    var label   = document.getElementById('signin-label');
+    var spinner = document.getElementById('signin-spinner');
+    label.textContent = 'Signing in…';
+    spinner.classList.remove('d-none');
+    btn.classList.add('pe-none');          // prevent double-click
+    btn.style.opacity = '0.8';
+  });
+})();
+</script>
+{% endblock %}

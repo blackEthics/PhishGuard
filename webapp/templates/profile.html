@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% block title %}Profile — PhishGuard{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center mb-4">
+  <h2 class="mb-0 me-auto">My Profile</h2>
+  <a href="{{ url_for('index') }}" class="btn btn-primary btn-sm">
+    &#x1F50D; Scan a URL
+  </a>
+</div>
+
+<div class="row g-4">
+
+  <!-- Left: identity card -->
+  <div class="col-lg-4">
+    <div class="card shadow-sm border-0 text-center">
+      <div class="card-body p-4">
+        {% if current_user.picture %}
+          <img src="{{ current_user.picture }}"
+               alt="{{ current_user.name }}"
+               class="rounded-circle mb-3 border border-2"
+               width="96" height="96"
+               referrerpolicy="no-referrer"
+               onerror="this.replaceWith(document.getElementById('avatar-fallback').content.cloneNode(true))">
+          <template id="avatar-fallback">
+            <div class="rounded-circle bg-primary text-white d-inline-flex align-items-center
+                        justify-content-center mb-3 border border-2 fs-2 fw-bold"
+                 style="width:96px;height:96px;">
+              {{ current_user.name[0].upper() }}
+            </div>
+          </template>
+        {% else %}
+          <div class="rounded-circle bg-primary text-white d-inline-flex align-items-center
+                      justify-content-center mb-3 border border-2 fs-2 fw-bold"
+               style="width:96px;height:96px;">
+            {{ current_user.name[0].upper() }}
+          </div>
+        {% endif %}
+
+        <h5 class="fw-bold mb-1">{{ current_user.name | e }}</h5>
+        <p class="text-muted small mb-3">{{ current_user.email | e }}</p>
+        <span class="badge bg-success">Active Account</span>
+      </div>
+
+      <ul class="list-group list-group-flush text-start">
+        <li class="list-group-item d-flex justify-content-between align-items-center">
+          <span class="text-muted small">Member since</span>
+          <span class="small">{{ current_user.created_at[:10] }}</span>
+        </li>
+        <li class="list-group-item d-flex justify-content-between align-items-center">
+          <span class="text-muted small">Last login</span>
+          <span class="small">{{ current_user.last_login[:10] }}</span>
+        </li>
+        <li class="list-group-item d-flex justify-content-between align-items-center">
+          <span class="text-muted small">Total scans</span>
+          <strong>{{ scan_count }}</strong>
+        </li>
+      </ul>
+
+      <div class="card-body d-grid gap-2">
+        <a href="{{ url_for('auth.history') }}" class="btn btn-outline-primary btn-sm">
+          &#x1F4CB; View Full History
+        </a>
+        <a href="{{ url_for('auth.settings') }}" class="btn btn-outline-secondary btn-sm">
+          &#x2699;&#xFE0F; Account Settings
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right: recent activity -->
+  <div class="col-lg-8">
+    <div class="card shadow-sm border-0">
+      <div class="card-header bg-transparent d-flex align-items-center">
+        <span class="fw-semibold me-auto">Recent Scans</span>
+        {% if scan_count > 5 %}
+          <a href="{{ url_for('auth.history') }}" class="btn btn-sm btn-outline-primary">
+            View all {{ scan_count }}
+          </a>
+        {% endif %}
+      </div>
+
+      <div class="card-body p-0">
+        {% if recent %}
+          <div class="table-responsive">
+            <table class="table table-hover mb-0 align-middle">
+              <thead class="table-light">
+                <tr>
+                  <th>URL</th>
+                  <th class="text-center" style="width:90px;">Verdict</th>
+                  <th style="width:120px;">When</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for scan in recent %}
+                <tr>
+                  <td class="text-truncate" style="max-width:280px;">
+                    <span title="{{ scan.url | e }}" class="font-monospace small">
+                      {{ scan.url | e }}
+                    </span>
+                  </td>
+                  <td class="text-center">
+                    {% if scan.verdict == 'bad' %}
+                      <span class="badge bg-danger">Phishing</span>
+                    {% else %}
+                      <span class="badge bg-success">Safe</span>
+                    {% endif %}
+                  </td>
+                  <td class="text-muted small text-nowrap">
+                    {{ scan.timestamp[:16] if scan.timestamp else '—' }}
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <div class="text-center py-5 text-muted">
+            <div style="font-size:2.5rem;">&#x1F50D;</div>
+            <p class="mb-2 mt-2">No scans yet.</p>
+            <a href="{{ url_for('index') }}" class="btn btn-primary btn-sm">
+              Scan your first URL
+            </a>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- Stats strip -->
+    <div class="row g-3 mt-1">
+      <div class="col-sm-4">
+        <div class="card border-0 shadow-sm text-center py-3">
+          <div class="fs-3 fw-bold text-primary">{{ scan_count }}</div>
+          <div class="text-muted small">Total Scans</div>
+        </div>
+      </div>
+      <div class="col-sm-4">
+        <div class="card border-0 shadow-sm text-center py-3">
+          <div class="fs-3 fw-bold text-success">
+            {{ (recent | selectattr('verdict','eq','good') | list | length) }}
+          </div>
+          <div class="text-muted small">Safe (recent 5)</div>
+        </div>
+      </div>
+      <div class="col-sm-4">
+        <div class="card border-0 shadow-sm text-center py-3">
+          <div class="fs-3 fw-bold text-danger">
+            {{ (recent | selectattr('verdict','eq','bad') | list | length) }}
+          </div>
+          <div class="text-muted small">Phishing (recent 5)</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
